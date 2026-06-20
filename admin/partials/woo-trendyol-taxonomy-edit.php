@@ -1,0 +1,74 @@
+<?php
+/**
+ * Taxonomy partial — Edit Category screen.
+ *
+ * Renders the Trendyol category mapping section on the
+ * product_cat "Edit Category" form.
+ *
+ * Variables available from Woo_Trendyol_Taxonomy::edit_category_fields():
+ *  @var WP_Term $term           Current taxonomy term.
+ *  @var string  $trendyol_id    Existing Trendyol category ID (may be empty).
+ *  @var string  $trendyol_path  Existing Trendyol category path (may be empty).
+ *
+ * @link    https://developers.trendyol.com
+ * @since   1.0.0
+ * @package Woo_Trendyol
+ * @subpackage Woo_Trendyol/admin/partials
+ */
+
+if ( ! defined( 'WPINC' ) ) {
+    die;
+}
+
+// Build a human-readable display path from the stored '|||'-delimited path.
+$display_path = ! empty( $trendyol_path )
+    ? implode( ' > ', array_map( 'trim', explode( '|||', $trendyol_path ) ) )
+    : '';
+?>
+<tr class="form-field term-trendyol-cat-wrap">
+    <th scope="row">
+        <label><?php esc_html_e( 'Trendyol Category Mapping', 'woo-trendyol' ); ?></label>
+    </th>
+    <td>
+
+        <?php wp_nonce_field( 'woo_trendyol_taxonomy_save', 'woo_trendyol_taxonomy_nonce' ); ?>
+
+        <div class="wt-taxonomy-mapping-box">
+            <p class="description">
+                <?php esc_html_e( 'Select the corresponding Trendyol category. Each level is loaded automatically based on your selection.', 'woo-trendyol' ); ?>
+            </p>
+
+            <?php if ( ! empty( $display_path ) ) : ?>
+                <p class="wt-current-mapping">
+                    <strong><?php esc_html_e( 'Current mapping:', 'woo-trendyol' ); ?></strong>
+                    <span class="wt-selected-path"><?php echo esc_html( $display_path ); ?></span>
+                    <?php if ( ! empty( $trendyol_id ) ) : ?>
+                        <code class="wt-code">(ID: <?php echo esc_html( $trendyol_id ); ?>)</code>
+                    <?php endif; ?>
+                </p>
+            <?php endif; ?>
+
+            <!-- Cascading dropdowns are injected here by woo-trendyol-taxonomy.js -->
+            <div id="trendyol-dropdowns-container"></div>
+
+            <!-- Hidden fields that store the final resolved values.
+                 Pre-populated with existing values so JS can restore the selection. -->
+            <input type="hidden"
+                   name="trendyol_category_id"
+                   id="trendyol_category_id"
+                   value="<?php echo esc_attr( $trendyol_id ); ?>" />
+            <input type="hidden"
+                   name="trendyol_category_path"
+                   id="trendyol_category_path"
+                   value="<?php echo esc_attr( $trendyol_path ); ?>" />
+
+            <!-- Live path display (updated by JS as user selects) -->
+            <p class="wt-selected-path-wrap">
+                <span id="trendyol-selected-path" class="wt-selected-path">
+                    <?php echo esc_html( $display_path ); ?>
+                </span>
+            </p>
+        </div>
+
+    </td>
+</tr>

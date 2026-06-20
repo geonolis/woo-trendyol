@@ -1,0 +1,1182 @@
+/**
+ * WooCommerce Trendyol Integration — Admin Styles
+ *
+ * Covers: settings page, product meta box, taxonomy mapping UI.
+ *
+ * @link    https://developers.trendyol.com
+ * @since   1.0.0
+ * @package Woo_Trendyol
+ */
+
+/* =========================================================================
+   Settings page layout
+   ========================================================================= */
+
+.woo-trendyol-settings-wrap {
+    max-width: 1200px;
+}
+
+.wt-page-title {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 1.5rem;
+    margin-bottom: 16px;
+}
+
+.wt-logo-icon {
+    font-size: 1.4rem;
+}
+
+/* Two-column grid: settings form + sidebar */
+.wt-settings-grid {
+    display: grid;
+    grid-template-columns: 1fr 320px;
+    gap: 24px;
+    margin-top: 20px;
+}
+
+@media (max-width: 960px) {
+    .wt-settings-grid {
+        grid-template-columns: 1fr;
+    }
+}
+
+/* =========================================================================
+   Connection banner
+   ========================================================================= */
+
+.wt-connection-banner {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 12px 16px;
+    border-radius: 4px;
+    border-left: 4px solid;
+    margin-bottom: 4px;
+    font-size: 0.9rem;
+}
+
+.wt-connection-banner--active {
+    background: #edfaef;
+    border-color: #46b450;
+    color: #1a6b1e;
+}
+
+.wt-connection-banner--inactive {
+    background: #fff8e5;
+    border-color: #f0b849;
+    color: #7a5c00;
+}
+
+.wt-connection-dot {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    flex-shrink: 0;
+}
+
+.wt-connection-banner--active   .wt-connection-dot { background: #46b450; }
+.wt-connection-banner--inactive .wt-connection-dot { background: #f0b849; }
+
+/* =========================================================================
+   Cards
+   ========================================================================= */
+
+.wt-card {
+    background: #fff;
+    border: 1px solid #dcdcde;
+    border-radius: 4px;
+    padding: 20px 24px;
+    box-shadow: 0 1px 2px rgba(0,0,0,.05);
+}
+
+.wt-card h2 {
+    margin-top: 0;
+    font-size: 1rem;
+    border-bottom: 1px solid #f0f0f1;
+    padding-bottom: 10px;
+    margin-bottom: 14px;
+}
+
+.wt-sidebar {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+}
+
+/* =========================================================================
+   Toggle switch
+   ========================================================================= */
+
+.wt-toggle-switch {
+    position: relative;
+    display: inline-block;
+    width: 44px;
+    height: 24px;
+    vertical-align: middle;
+}
+
+.wt-toggle-switch input {
+    opacity: 0;
+    width: 0;
+    height: 0;
+}
+
+.wt-toggle-slider {
+    position: absolute;
+    inset: 0;
+    background: #ccc;
+    border-radius: 24px;
+    cursor: pointer;
+    transition: background 0.2s;
+}
+
+.wt-toggle-slider::before {
+    content: '';
+    position: absolute;
+    width: 18px;
+    height: 18px;
+    left: 3px;
+    bottom: 3px;
+    background: #fff;
+    border-radius: 50%;
+    transition: transform 0.2s;
+}
+
+.wt-toggle-switch input:checked + .wt-toggle-slider {
+    background: #2271b1;
+}
+
+.wt-toggle-switch input:checked + .wt-toggle-slider::before {
+    transform: translateX(20px);
+}
+
+.wt-toggle-label {
+    margin-left: 8px;
+    vertical-align: middle;
+}
+
+/* =========================================================================
+   Badges
+   ========================================================================= */
+
+.wt-badge {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 3px;
+    font-size: 0.78rem;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    text-transform: uppercase;
+}
+
+.wt-badge--success  { background: #edfaef; color: #1a6b1e; border: 1px solid #46b450; }
+.wt-badge--error    { background: #fce8e8; color: #8a1f1f; border: 1px solid #d63638; }
+.wt-badge--warning  { background: #fff8e5; color: #7a5c00; border: 1px solid #f0b849; }
+.wt-badge--pending  { background: #e8f0fb; color: #1a4a8a; border: 1px solid #2271b1; }
+.wt-badge--inactive { background: #f0f0f1; color: #50575e; border: 1px solid #c3c4c7; }
+.wt-badge--unknown  { background: #f0f0f1; color: #50575e; border: 1px solid #c3c4c7; }
+
+/* =========================================================================
+   Test connection result
+   ========================================================================= */
+
+.wt-test-result {
+    margin-top: 10px;
+    padding: 8px 12px;
+    border-radius: 3px;
+    font-size: 0.875rem;
+}
+
+.wt-test-result.success { background: #edfaef; color: #1a6b1e; border: 1px solid #46b450; }
+.wt-test-result.error   { background: #fce8e8; color: #8a1f1f; border: 1px solid #d63638; }
+
+/* =========================================================================
+   Product meta box
+   ========================================================================= */
+
+.wt-product-meta-box {
+    font-size: 0.875rem;
+}
+
+.wt-meta-section {
+    margin-bottom: 12px;
+}
+
+.wt-meta-section-title {
+    margin: 0 0 8px;
+    font-size: 0.8rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: #50575e;
+    border-bottom: 1px solid #f0f0f1;
+    padding-bottom: 4px;
+}
+
+.wt-meta-table {
+    width: 100%;
+    border-collapse: collapse;
+}
+
+.wt-meta-table th,
+.wt-meta-table td {
+    padding: 4px 0;
+    vertical-align: top;
+    line-height: 1.5;
+}
+
+.wt-meta-table th {
+    width: 45%;
+    color: #50575e;
+    font-weight: 400;
+    padding-right: 8px;
+}
+
+.wt-divider {
+    border: none;
+    border-top: 1px solid #f0f0f1;
+    margin: 12px 0;
+}
+
+/* Category path display */
+.wt-category-path {
+    color: #0071a1;
+    font-size: 0.8rem;
+    line-height: 1.4;
+}
+
+.wt-source-label {
+    font-size: 0.75rem;
+    color: #50575e;
+    margin-left: 4px;
+}
+
+/* Override field */
+.wt-override-field {
+    margin-top: 10px;
+}
+
+.wt-override-field label {
+    display: block;
+    margin-bottom: 4px;
+}
+
+.wt-override-field input {
+    width: 100%;
+    box-sizing: border-box;
+}
+
+.wt-override-active-notice {
+    color: #8a1f1f;
+    font-size: 0.8rem;
+    margin: 4px 0 0;
+}
+
+/* Code snippets */
+.wt-code {
+    background: #f0f0f1;
+    padding: 1px 5px;
+    border-radius: 2px;
+    font-size: 0.85em;
+}
+
+.wt-code--small {
+    font-size: 0.75em;
+    word-break: break-all;
+}
+
+/* Error message */
+.wt-error-message {
+    color: #8a1f1f;
+    font-size: 0.8rem;
+}
+
+/* Refresh button row */
+.wt-refresh-row {
+    margin-top: 10px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.wt-refresh-result {
+    font-size: 0.8rem;
+}
+
+.wt-refresh-result.success { color: #1a6b1e; }
+.wt-refresh-result.error   { color: #8a1f1f; }
+
+/* =========================================================================
+   Taxonomy mapping box (product_cat screens)
+   ========================================================================= */
+
+.wt-taxonomy-mapping-box {
+    background: #f9f9f9;
+    border: 1px solid #dcdcde;
+    border-radius: 3px;
+    padding: 14px 16px;
+    max-width: 480px;
+}
+
+.trendyol-category-level {
+    display: block;
+    width: 100%;
+    margin-bottom: 8px;
+    max-width: 440px;
+}
+
+.wt-selected-path {
+    font-weight: 600;
+    color: #0071a1;
+    font-size: 0.875rem;
+}
+
+.wt-selected-path-wrap {
+    margin-top: 8px;
+    min-height: 1.4em;
+}
+
+.wt-current-mapping {
+    margin-bottom: 10px;
+    font-size: 0.875rem;
+}
+
+/* =========================================================================
+   Currency badge
+   ========================================================================= */
+
+.wt-currency-badge {
+    display: inline-block;
+    background: #0073aa;
+    color: #fff;
+    font-size: 0.75rem;
+    font-weight: 600;
+    padding: 2px 8px;
+    border-radius: 12px;
+    letter-spacing: 0.05em;
+    vertical-align: middle;
+}
+
+/* =========================================================================
+   Section divider & headers
+   ========================================================================= */
+
+.wt-section-divider {
+    border: none;
+    border-top: 1px solid #dcdcde;
+    margin: 24px 0;
+}
+
+.wt-section-header h2 {
+    font-size: 1.1rem;
+    margin-bottom: 4px;
+}
+
+.wt-section-desc {
+    color: #646970;
+    margin-bottom: 12px;
+}
+
+/* =========================================================================
+   Global attribute grid
+   ========================================================================= */
+
+.wt-attr-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+    gap: 16px;
+    margin-bottom: 16px;
+}
+
+.wt-attr-card {
+    background: #f6f7f7;
+    border: 1px solid #dcdcde;
+    border-radius: 6px;
+    padding: 14px 16px;
+    display: flex;
+    gap: 12px;
+    align-items: flex-start;
+}
+
+.wt-attr-card__icon {
+    font-size: 1.6rem;
+    line-height: 1;
+    flex-shrink: 0;
+}
+
+.wt-attr-card__body h3 {
+    margin: 0 0 4px;
+    font-size: 0.95rem;
+}
+
+.wt-attr-table {
+    margin: 0 !important;
+}
+
+.wt-attr-table th,
+.wt-attr-table td {
+    padding: 4px 0 !important;
+}
+
+/* =========================================================================
+   Bulk push tool
+   ========================================================================= */
+
+.wt-card--bulk-push {
+    border-left: 4px solid #0073aa;
+}
+
+.wt-bulk-filters {
+    margin-bottom: 12px;
+}
+
+.wt-progress-bar {
+    height: 12px;
+    background: #dcdcde;
+    border-radius: 6px;
+    overflow: hidden;
+    margin-top: 12px;
+}
+
+.wt-progress-bar__fill {
+    height: 100%;
+    background: #0073aa;
+    border-radius: 6px;
+    transition: width 0.3s ease;
+}
+
+.wt-progress-text {
+    font-size: 0.8rem;
+    color: #646970;
+    margin-top: 4px;
+}
+
+.wt-bulk-results {
+    margin-top: 16px;
+    max-height: 300px;
+    overflow-y: auto;
+    border: 1px solid #dcdcde;
+    border-radius: 4px;
+    padding: 8px;
+    background: #fff;
+}
+
+.wt-result-row {
+    padding: 4px 8px;
+    border-radius: 3px;
+    margin-bottom: 4px;
+    font-size: 0.85rem;
+}
+
+.wt-result--success { background: #edfaef; color: #1a7a2e; }
+.wt-result--error   { background: #fce8e8; color: #8b1a1a; }
+.wt-result--info    { background: #e8f4fd; color: #0a4a7a; }
+
+/* =========================================================================
+   Cargo company list
+   ========================================================================= */
+
+.wt-cargo-list {
+    margin: 8px 0 0;
+    padding: 0;
+    list-style: none;
+    font-size: 0.85rem;
+}
+
+.wt-cargo-list li {
+    padding: 4px 0;
+    border-bottom: 1px solid #f0f0f1;
+}
+
+.wt-cargo-list li:last-child {
+    border-bottom: none;
+}
+
+.wt-select-cargo {
+    margin-left: 8px;
+    font-size: 0.8rem;
+}
+
+/* =========================================================================
+   Notice styles (AJAX results)
+   ========================================================================= */
+
+.wt-notice {
+    padding: 8px 12px;
+    border-radius: 4px;
+    margin-top: 8px;
+    font-size: 0.9rem;
+}
+
+.wt-notice--success { background: #edfaef; color: #1a7a2e; border-left: 3px solid #1a7a2e; }
+.wt-notice--error   { background: #fce8e8; color: #8b1a1a; border-left: 3px solid #8b1a1a; }
+.wt-notice--info    { background: #e8f4fd; color: #0a4a7a; border-left: 3px solid #0a4a7a; }
+
+
+/* =========================================================
+   Attribute Value Mapping UI
+   ========================================================= */
+
+.wt-attr-category-loader {
+    background: #f0f6fc;
+    border: 1px solid #c3d9f0;
+    border-radius: 4px;
+    padding: 14px 16px;
+    margin: 12px 0 20px;
+}
+
+.wt-attr-category-loader label {
+    display: block;
+    margin-bottom: 8px;
+}
+
+.wt-attr-category-loader .button {
+    margin-left: 8px;
+}
+
+.wt-attr-category-loader .description {
+    margin-top: 8px;
+    color: #666;
+}
+
+.wt-attr-mapping-field {
+    width: 100%;
+}
+
+.wt-attr-mapping-step {
+    margin-bottom: 12px;
+}
+
+.wt-attr-mapping-label {
+    display: block;
+    margin-bottom: 6px;
+}
+
+.wt-wc-attr-selector {
+    min-width: 280px;
+}
+
+.wt-attr-mapping-table-wrap {
+    margin-top: 10px;
+}
+
+.wt-mapping-placeholder {
+    color: #888;
+    font-style: italic;
+    padding: 10px 0;
+}
+
+.wt-mapping-table {
+    border-collapse: collapse;
+    width: 100%;
+    margin-top: 8px;
+}
+
+.wt-mapping-table th {
+    background: #f1f1f1;
+    padding: 8px 12px;
+    text-align: left;
+    font-weight: 600;
+    border-bottom: 2px solid #ddd;
+}
+
+.wt-mapping-table td {
+    padding: 8px 12px;
+    border-bottom: 1px solid #eee;
+    vertical-align: top;
+}
+
+.wt-mapping-table tbody tr:hover td {
+    background: #fafafa;
+}
+
+.wt-ty-value-label {
+    width: 30%;
+}
+
+.wt-ty-id-badge {
+    display: inline-block;
+    background: #2271b1;
+    color: #fff;
+    border-radius: 3px;
+    padding: 2px 8px;
+    font-size: 12px;
+    font-weight: 600;
+}
+
+.wt-ty-id-num {
+    color: #999;
+    font-size: 11px;
+    margin-left: 4px;
+}
+
+.wt-wc-terms-cell {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    align-items: flex-start;
+}
+
+.wt-term-checkbox {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    background: #f6f7f7;
+    border: 1px solid #ddd;
+    border-radius: 3px;
+    padding: 3px 8px;
+    font-size: 12px;
+    cursor: pointer;
+    white-space: nowrap;
+    transition: background 0.15s, border-color 0.15s;
+}
+
+.wt-term-checkbox:hover {
+    background: #e8f0fe;
+    border-color: #2271b1;
+}
+
+.wt-term-checkbox input[type="checkbox"] {
+    margin: 0;
+    cursor: pointer;
+}
+
+.wt-attr-mapping-form-table th {
+    width: 220px;
+    vertical-align: top;
+    padding-top: 14px;
+}
+
+.wt-attr-mapping-form-table td {
+    padding-top: 10px;
+}
+
+/* =========================================================
+   Send to Trendyol — product meta box section
+   ========================================================= */
+
+/* Section wrapper */
+.wt-send-section {
+    background: #f9f9f9;
+    border: 1px solid #e0e0e0;
+    border-radius: 4px;
+    padding: 12px 14px;
+}
+
+/* Contextual note above the button */
+.wt-send-note {
+    margin: 0 0 10px;
+    color: #555;
+}
+
+/* Prerequisites checklist */
+.wt-prereq-list {
+    list-style: none;
+    margin: 0 0 12px;
+    padding: 0;
+}
+
+.wt-prereq-item {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 12px;
+    padding: 3px 0;
+}
+
+.wt-prereq-icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 18px;
+    height: 18px;
+    border-radius: 50%;
+    font-size: 11px;
+    font-weight: 700;
+    flex-shrink: 0;
+}
+
+.wt-prereq--ok .wt-prereq-icon {
+    background: #d4edda;
+    color: #155724;
+}
+
+.wt-prereq--fail .wt-prereq-icon {
+    background: #f8d7da;
+    color: #721c24;
+}
+
+.wt-prereq--ok {
+    color: #155724;
+}
+
+.wt-prereq--fail {
+    color: #721c24;
+}
+
+/* Send button row */
+.wt-send-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-top: 4px;
+}
+
+.wt-send-btn {
+    min-width: 160px;
+}
+
+.wt-send-spinner {
+    float: none;
+}
+
+/* Result notice */
+.wt-send-result {
+    margin-top: 10px;
+    padding: 8px 12px;
+    border-radius: 3px;
+    font-size: 13px;
+    border-left: 4px solid transparent;
+}
+
+.wt-send-result.wt-notice--success {
+    background: #d4edda;
+    border-color: #28a745;
+    color: #155724;
+}
+
+.wt-send-result.wt-notice--error {
+    background: #f8d7da;
+    border-color: #dc3545;
+    color: #721c24;
+}
+
+.wt-send-result.wt-notice--pending {
+    background: #fff3cd;
+    border-color: #ffc107;
+    color: #856404;
+}
+
+/* =========================================================================
+   Tab navigation
+   ========================================================================= */
+
+/*
+ * .wt-nav-tab-wrapper wraps the native WordPress nav-tab links.
+ * We add a bottom border that connects visually with the card below.
+ */
+.wt-nav-tab-wrapper {
+    margin-bottom: 0;
+    padding-bottom: 0;
+    border-bottom: 1px solid #c3c4c7;
+}
+
+/* Ensure the active tab merges seamlessly with the card below it */
+.wt-nav-tab-wrapper .nav-tab-active {
+    background: #fff;
+    border-bottom-color: #fff;
+    margin-bottom: -1px;
+}
+
+/* Dashicons inside nav-tab links */
+.wt-nav-tab-wrapper .nav-tab .dashicons {
+    font-size: 16px;
+    width: 16px;
+    height: 16px;
+    vertical-align: text-bottom;
+    margin-right: 4px;
+}
+
+/* =========================================================================
+   Tab header (inside each tab panel)
+   ========================================================================= */
+
+.wt-tab-header {
+    padding: 20px 0 8px;
+    border-bottom: 1px solid #e0e0e0;
+    margin-bottom: 20px;
+}
+
+.wt-tab-header h2 {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 1.2rem;
+    margin: 0 0 8px;
+}
+
+.wt-tab-header h2 .dashicons {
+    color: #2271b1;
+    font-size: 1.3rem;
+    width: 1.3rem;
+    height: 1.3rem;
+}
+
+.wt-tab-desc {
+    color: #50575e;
+    font-size: 0.875rem;
+    margin: 4px 0;
+    max-width: 680px;
+}
+
+/* =========================================================================
+   Credentials tab — action row (Save + Test buttons)
+   ========================================================================= */
+
+.wt-credentials-actions {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-top: 16px;
+    padding-top: 16px;
+    border-top: 1px solid #e0e0e0;
+    flex-wrap: wrap;
+}
+
+.wt-credentials-actions .button .dashicons {
+    font-size: 14px;
+    width: 14px;
+    height: 14px;
+    vertical-align: middle;
+    margin-right: 4px;
+}
+
+/* =========================================================================
+   Connection status badge (sidebar card)
+   ========================================================================= */
+
+.wt-status-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 10px;
+    border-radius: 20px;
+    font-size: 0.85rem;
+    font-weight: 600;
+}
+
+.wt-status-badge--success {
+    background: #edfaef;
+    color: #1a6b1e;
+    border: 1px solid #46b450;
+}
+
+.wt-status-badge--error {
+    background: #fdf2f2;
+    color: #8a1f1f;
+    border: 1px solid #d63638;
+}
+
+.wt-status-badge .dashicons {
+    font-size: 16px;
+    width: 16px;
+    height: 16px;
+}
+
+/* =========================================================================
+   Attribute category loader card (attributes tab)
+   ========================================================================= */
+
+.wt-card--loader {
+    margin-bottom: 24px;
+    background: #f6f7f7;
+    border: 1px dashed #c3c4c7;
+}
+
+.wt-card--loader h3 {
+    margin: 0 0 8px;
+    font-size: 1rem;
+}
+
+.wt-loader-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+    margin-top: 10px;
+}
+
+.wt-loader-row label {
+    white-space: nowrap;
+}
+
+.wt-loader-row .button .dashicons {
+    font-size: 14px;
+    width: 14px;
+    height: 14px;
+    vertical-align: middle;
+    margin-right: 4px;
+}
+
+#wt-attr-load-notice {
+    margin-top: 10px;
+    padding: 8px 12px;
+    border-radius: 3px;
+    font-size: 0.85rem;
+}
+
+#wt-attr-load-notice.notice-success {
+    background: #edfaef;
+    border-left: 4px solid #46b450;
+    color: #1a6b1e;
+}
+
+#wt-attr-load-notice.notice-error {
+    background: #fdf2f2;
+    border-left: 4px solid #d63638;
+    color: #8a1f1f;
+}
+
+/* =========================================================================
+   Page title icon
+   ========================================================================= */
+
+.wt-page-icon {
+    color: #2271b1;
+    font-size: 1.6rem;
+    width: 1.6rem;
+    height: 1.6rem;
+    vertical-align: middle;
+}
+
+/* =========================================================================
+   Quick Reference definition list
+   ========================================================================= */
+
+.wt-quick-ref {
+    margin: 0;
+}
+
+.wt-quick-ref dt {
+    font-weight: 600;
+    color: #1d2327;
+    margin-top: 10px;
+}
+
+.wt-quick-ref dt:first-child {
+    margin-top: 0;
+}
+
+.wt-quick-ref dd {
+    margin: 2px 0 0 0;
+    color: #50575e;
+    font-size: 0.85rem;
+}
+
+/* =========================================================================
+   Sidebar card headings — use h3 in sidebar, h2 in main form
+   ========================================================================= */
+
+.wt-sidebar .wt-card h3 {
+    font-size: 0.95rem;
+    margin: 0 0 10px;
+    padding-bottom: 8px;
+    border-bottom: 1px solid #e0e0e0;
+}
+
+/* Bulk push button icon */
+#wt-bulk-push .dashicons,
+.wt-card--logs .button .dashicons {
+    font-size: 14px;
+    width: 14px;
+    height: 14px;
+    vertical-align: middle;
+    margin-right: 4px;
+}
+
+/* =========================================================================
+   Barcode source field (Product Defaults tab)
+   ========================================================================= */
+
+/*
+ * Fieldset wrapper — removes default browser fieldset styling.
+ */
+.wt-barcode-source-fieldset {
+    border: none;
+    padding: 0;
+    margin: 0;
+}
+
+/*
+ * Each radio option is a block-level label so the description wraps
+ * cleanly below the radio + bold text on narrow screens.
+ */
+.wt-radio-label {
+    display: block;
+    margin-bottom: 10px;
+    line-height: 1.6;
+    cursor: pointer;
+}
+
+.wt-radio-label input[type="radio"] {
+    margin-right: 6px;
+    vertical-align: middle;
+}
+
+.wt-radio-label strong {
+    vertical-align: middle;
+}
+
+.wt-radio-label .description {
+    display: inline;
+    color: #50575e;
+    font-size: 0.85rem;
+}
+
+.wt-radio-label input[disabled] + strong {
+    color: #a7aaad;
+}
+
+/*
+ * Sub-field rows (meta key input, attribute selector) are indented
+ * to visually associate them with their parent radio option.
+ */
+.wt-barcode-sub-field {
+    margin: 4px 0 14px 24px;
+    padding: 10px 14px;
+    background: #f6f7f7;
+    border-left: 3px solid #2271b1;
+    border-radius: 0 3px 3px 0;
+}
+
+.wt-sub-label {
+    display: inline-block;
+    min-width: 80px;
+    font-weight: 600;
+    margin-right: 6px;
+    vertical-align: middle;
+}
+
+.wt-barcode-sub-field input[type="text"],
+.wt-barcode-sub-field select {
+    vertical-align: middle;
+}
+
+/*
+ * Availability badges (green = available, yellow = requires upgrade).
+ */
+.wt-badge {
+    display: inline-block;
+    padding: 1px 7px;
+    border-radius: 10px;
+    font-size: 0.75rem;
+    font-weight: 600;
+    vertical-align: middle;
+    margin-left: 6px;
+}
+
+.wt-badge--success {
+    background: #edfaef;
+    color: #1a6b1e;
+    border: 1px solid #46b450;
+}
+
+.wt-badge--warning {
+    background: #fff8e5;
+    color: #7a5c00;
+    border: 1px solid #f0b849;
+}
+
+/* =========================================================================
+   Brand sync card & brand admin
+   ========================================================================= */
+
+/* Brand sync progress */
+#wt-brand-progress-wrap { margin: 8px 0; }
+#wt-brand-progress-fill { background: #2271b1; }
+
+/* Brand totals row */
+#wt-brand-totals { margin: 8px 0; }
+
+/* Brand results list */
+#wt-brand-results { margin-top: 8px; max-height: 220px; overflow-y: auto; }
+
+/* Brand status badges in taxonomy list table */
+.wt-brand-dot {
+    display: inline-block;
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    vertical-align: middle;
+}
+.wt-brand-dot--mapped   { background: #00a32a; }
+.wt-brand-dot--unmapped { background: #d63638; }
+
+/* Brand status badge on edit-brand page */
+.wt-badge {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 3px;
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: .04em;
+}
+.wt-badge--mapped   { background: #d7f0dc; color: #00a32a; }
+.wt-badge--unmapped { background: #fce8e8; color: #d63638; }
+
+/* Brand search section on edit-brand page */
+.wt-brand-search-section {
+    margin-top: 16px;
+    padding-top: 12px;
+    border-top: 1px solid #e0e0e0;
+}
+.wt-brand-search-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-bottom: 8px;
+}
+#wt-brand-search-input { flex: 1; max-width: 280px; }
+
+/* Brand search results list */
+#wt-brand-search-results {
+    margin-top: 8px;
+    max-height: 200px;
+    overflow-y: auto;
+    border: 1px solid #e0e0e0;
+    border-radius: 4px;
+    background: #fff;
+}
+.wt-brand-result-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 10px;
+    border-bottom: 1px solid #f0f0f0;
+}
+.wt-brand-result-row:last-child { border-bottom: none; }
+.wt-brand-result-name { flex: 1; font-weight: 500; }
+.wt-brand-result-id   { color: #888; font-size: 11px; }
+
+/* Brand mapping status message */
+#wt-brand-mapping-status {
+    display: inline-block;
+    margin-left: 8px;
+    font-style: italic;
+    color: #555;
+    font-size: 12px;
+}
+
+/* Pause buttons */
+#wt-bulk-pause,
+#wt-brand-sync-pause {
+    display: none;
+    margin-left: 6px;
+}
+
+/* Totals row */
+.wt-totals-row {
+    display: flex;
+    gap: 16px;
+    flex-wrap: wrap;
+    padding: 6px 0;
+}
+.wt-total-item {
+    font-size: 12px;
+    font-weight: 500;
+}
+.wt-total--submitted { color: #2271b1; }
+.wt-total--skipped   { color: #996800; }
+.wt-total--approved  { color: #00a32a; }
