@@ -52,13 +52,13 @@ class Woo_Trendyol_Attribute_Mapper {
      *
      * @since  1.0.0
      * @access public
-     * @var    array GLOBAL_ATTR_NAMES
+     * @var    array GLOBAL_ATTR_KEYWORDS
      */
-    public const GLOBAL_ATTR_NAMES = [
-        'gender'    => [ 'Cinsiyet', 'Gender', 'Φύλο' ],
-        'age'       => [ 'Yaş Grubu', 'Age Group', 'Ηλικιακή Ομάδα' ],
-        'brand'     => [ 'Marka', 'Brand', 'Μάρκα', 'Manufacturer' ],
-        'character' => [ 'Karakter', 'Character', 'Χαρακτήρας', 'Hero', 'License' ],
+    public const GLOBAL_ATTR_KEYWORDS = [
+        'gender'    => [ 'cinsiyet', 'gender', 'φύλο' ],
+        'age'       => [ 'yaş', 'age', 'ηλικ' ],
+        'brand'     => [ 'marka', 'brand', 'μάρκα', 'manufacturer' ],
+        'character' => [ 'karakter', 'character', 'χαρακτήρας', 'hero', 'license' ],
     ];
 
     /**
@@ -115,11 +115,11 @@ class Woo_Trendyol_Attribute_Mapper {
      * @param WC_Product $product     The WooCommerce product.
      * @param int        $category_id Trendyol leaf-level category ID.
      * @param int        $term_id     WooCommerce product_cat term ID (for per-category mapping).
-     * @return array Array of attribute objects ready for the Trendyol payload.
+     * @return array|WP_Error Array of attribute objects ready for the Trendyol payload, or WP_Error if a required attribute is missing.
      *               Each object: [ 'attributeId' => int, 'attributeValueId' => int ]
      *               or           [ 'attributeId' => int, 'customAttributeValue' => string ]
      */
-    public function build_attributes( WC_Product $product, int $category_id, int $term_id ): array {
+    public function build_attributes( WC_Product $product, int $category_id, int $term_id ): array|WP_Error {
         // Fetch the category attribute schema.
         $schema = $this->api->get_category_attributes( $category_id );
 
@@ -182,6 +182,12 @@ class Woo_Trendyol_Attribute_Mapper {
             if ( null !== $resolved ) {
                 $result[] = $resolved;
             } else {
+                $error_message = sprintf(
+                    __( 'Missing required attribute: "%s" (ID %d). Please map this attribute in the category settings or globally.', 'woo-trendyol' ),
+                    $attr_name,
+                    $attr_id
+                );
+                
                 $this->logger->warning(
                     sprintf(
                         'Could not resolve required attribute "%s" (ID %d) for product #%d.',
@@ -190,6 +196,8 @@ class Woo_Trendyol_Attribute_Mapper {
                         $product->get_id()
                     )
                 );
+                
+                return new WP_Error( 'missing_required_attribute', $error_message );
             }
         }
 
@@ -223,18 +231,18 @@ class Woo_Trendyol_Attribute_Mapper {
     }
 
     /**
-     * Check whether a given attribute name matches a global attribute slot.
+     * Check whether a given attribute name fuzzy-matches a global attribute slot.
      *
      * @since 1.0.0
      * @param string $attr_name Trendyol attribute name.
      * @return string|null Global slot key ('gender', 'age', 'brand', 'character') or null.
      */
     public function get_global_slot( string $attr_name ): ?string {
-        $normalised = strtolower( trim( $attr_name ) );
+        $normalised = mb_strtolower( trim( $attr_name ) );
 
-        foreach ( self::GLOBAL_ATTR_NAMES as $slot => $names ) {
-            foreach ( $names as $name ) {
-                if ( strtolower( $name ) === $normalised ) {
+        foreach ( self::GLOBAL_ATTR_KEYWORDS as $slot => $keywords ) {
+            foreach ( $keywords as $keyword ) {
+                if ( mb_stripos( $normalised, mb_strtolower( $keyword ) ) !== false ) {
                     return $slot;
                 }
             }
@@ -272,7 +280,20 @@ class Woo_Trendyol_Attribute_Mapper {
         array $wc_attributes,
         WC_Product $product
     ): ?array {
-        // --- Priority 1: Global settings ---
+        // --- Priority 1: Per-category mapping ---
+        // The category map stores: trendyol_attr_id => wc_attribute_slug
+        $mapped_wc_slug = $category_map[ (string) $attr_id ] ?? null;
+
+        if ( $mapped_wc_slug ) {
+            $normalised_slug = $this->normalise_slug( $mapped_wc_slug );
+            $wc_value        = $wc_attributes[ $normalised_slug ] ?? null;
+
+            if ( $wc_value ) {
+                return $this->match_value( $attr_id, $wc_value, $attr_values, $allow_custom );
+            }
+        }
+
+        // --- Priority 2: Global settings ---
         $global_slot = $this->get_global_slot( $attr_name );
 
         if ( $global_slot ) {
@@ -288,19 +309,6 @@ class Woo_Trendyol_Attribute_Mapper {
 
             if ( null !== $resolved ) {
                 return $resolved;
-            }
-        }
-
-        // --- Priority 2: Per-category mapping ---
-        // The category map stores: trendyol_attr_id => wc_attribute_slug
-        $mapped_wc_slug = $category_map[ (string) $attr_id ] ?? null;
-
-        if ( $mapped_wc_slug ) {
-            $normalised_slug = $this->normalise_slug( $mapped_wc_slug );
-            $wc_value        = $wc_attributes[ $normalised_slug ] ?? null;
-
-            if ( $wc_value ) {
-                return $this->match_value( $attr_id, $wc_value, $attr_values, $allow_custom );
             }
         }
 
@@ -491,27 +499,21 @@ class Woo_Trendyol_Attribute_Mapper {
     /**
      * Load the per-category attribute mapping from term meta.
      *
-     * The map is stored as JSON: { "trendyol_attr_id": "wc_attribute_slug", … }
+     * The map is stored as an array: [ trendyol_attr_id => wc_attribute_slug, … ]
      *
      * @since  1.0.0
      * @access private
      * @param  int $term_id WooCommerce product_cat term ID.
-     * @return array Decoded map array, or empty array if not set.
+     * @return array Map array, or empty array if not set.
      */
     private function load_category_attribute_map( int $term_id ): array {
         if ( ! $term_id ) {
             return [];
         }
 
-        $raw = get_term_meta( $term_id, 'trendyol_attr_map', true );
+        $mappings = get_term_meta( $term_id, '_trendyol_attribute_mappings', true );
 
-        if ( empty( $raw ) ) {
-            return [];
-        }
-
-        $decoded = json_decode( $raw, true );
-
-        return is_array( $decoded ) ? $decoded : [];
+        return is_array( $mappings ) ? $mappings : [];
     }
 
     /**

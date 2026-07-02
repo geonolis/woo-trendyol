@@ -278,6 +278,11 @@ class Woo_Trendyol {
         $this->loader->add_action( 'wp_ajax_trendyol_load_attr_values', $admin, 'ajax_load_attr_values' );
         $this->loader->add_action( 'wp_ajax_trendyol_get_wc_terms',     $admin, 'ajax_get_wc_terms' );
 
+        // AJAX handlers — Sync actions (Brands are handled in brand admin).
+        $this->loader->add_action( 'wp_ajax_trendyol_sync_categories',          $admin, 'ajax_sync_categories' );
+        $this->loader->add_action( 'wp_ajax_trendyol_sync_category_attributes', $admin, 'ajax_sync_category_attributes' );
+        $this->loader->add_action( 'wp_ajax_trendyol_sync_attribute_values',    $admin, 'ajax_sync_attribute_values' );
+
         // Taxonomy mapper (cascading dropdowns on product_cat).
         $taxonomy = new Woo_Trendyol_Taxonomy(
             $this->plugin_name,

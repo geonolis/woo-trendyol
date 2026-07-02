@@ -339,10 +339,35 @@ class Woo_Trendyol_API_Client {
             return $cached;
         }
 
-        $response = $this->get( "/product/categories/{$category_id}/attributes" );
+        $response = $this->get( "/product/categories/{$category_id}/attributes", [], [ 'Accept-Language' => 'el' ] );
 
         if ( ! is_wp_error( $response ) ) {
             // Cache for 24 hours — category schemas rarely change.
+            set_transient( $cache_key, $response, DAY_IN_SECONDS );
+        }
+
+        return $response;
+    }
+
+    /**
+     * Fetch the category tree from Trendyol.
+     *
+     * Endpoint: GET /product/category-tree
+     *
+     * @since 1.0.0
+     * @return array|WP_Error Decoded category tree or WP_Error.
+     */
+    public function get_categories(): array|WP_Error {
+        $cache_key = 'wt_category_tree';
+        $cached    = get_transient( $cache_key );
+
+        if ( false !== $cached ) {
+            return $cached;
+        }
+
+        $response = $this->get( '/product/category-tree', [], [ 'Accept-Language' => 'el' ] );
+
+        if ( ! is_wp_error( $response ) ) {
             set_transient( $cache_key, $response, DAY_IN_SECONDS );
         }
 
@@ -360,7 +385,7 @@ class Woo_Trendyol_API_Client {
      * @return array|WP_Error Decoded brand list or WP_Error.
      */
     public function get_brands( int $page = 0, int $size = 1000 ): array|WP_Error {
-        return $this->get( '/product/brands', [ 'page' => $page, 'size' => $size ] );
+        return $this->get( '/product/brands', [ 'page' => $page, 'size' => $size ], [ 'Accept-Language' => 'el' ] );
     }
 
     /**
@@ -380,7 +405,7 @@ class Woo_Trendyol_API_Client {
             return $cached;
         }
 
-        $response = $this->get( '/product/brands/by-name', [ 'name' => $name ] );
+        $response = $this->get( '/product/brands/by-name', [ 'name' => $name ], [ 'Accept-Language' => 'el' ] );
 
         if ( ! is_wp_error( $response ) ) {
             set_transient( $cache_key, $response, 12 * HOUR_IN_SECONDS );
@@ -494,16 +519,17 @@ class Woo_Trendyol_API_Client {
      * @access private
      * @param  string $endpoint Relative endpoint path.
      * @param  array  $params   Optional query string parameters.
+     * @param  array  $headers  Optional additional headers.
      * @return array|WP_Error   Decoded JSON response or WP_Error.
      */
-    private function get( string $endpoint, array $params = [] ): array|WP_Error {
+    private function get( string $endpoint, array $params = [], array $headers = [] ): array|WP_Error {
         $url = self::BASE_URL . $endpoint;
 
         if ( ! empty( $params ) ) {
             $url = add_query_arg( $params, $url );
         }
 
-        $response = wp_remote_get( $url, $this->build_request_args() );
+        $response = wp_remote_get( $url, $this->build_request_args( 'GET', [], $headers ) );
 
         return $this->parse_response( $response, 'GET', $url );
     }
@@ -515,11 +541,12 @@ class Woo_Trendyol_API_Client {
      * @access private
      * @param  string $endpoint Relative endpoint path.
      * @param  array  $body     Request body to JSON-encode.
+     * @param  array  $headers  Optional additional headers.
      * @return array|WP_Error   Decoded JSON response or WP_Error.
      */
-    private function put( string $endpoint, array $body ): array|WP_Error {
+    private function put( string $endpoint, array $body, array $headers = [] ): array|WP_Error {
         $url  = self::BASE_URL . $endpoint;
-        $args = $this->build_request_args( 'PUT', $body );
+        $args = $this->build_request_args( 'PUT', $body, $headers );
 
         $response = wp_remote_request( $url, $args );
 
@@ -533,11 +560,12 @@ class Woo_Trendyol_API_Client {
      * @access private
      * @param  string $endpoint Relative endpoint path.
      * @param  array  $body     Request body to JSON-encode.
+     * @param  array  $headers  Optional additional headers.
      * @return array|WP_Error   Decoded JSON response or WP_Error.
      */
-    private function post( string $endpoint, array $body ): array|WP_Error {
+    private function post( string $endpoint, array $body, array $headers = [] ): array|WP_Error {
         $url  = self::BASE_URL . $endpoint;
-        $args = $this->build_request_args( 'POST', $body );
+        $args = $this->build_request_args( 'POST', $body, $headers );
 
         $response = wp_remote_post( $url, $args );
 
@@ -551,21 +579,22 @@ class Woo_Trendyol_API_Client {
      * @access private
      * @param  string $method HTTP method (GET, PUT, POST). Default 'GET'.
      * @param  array  $body   Optional request body for PUT/POST.
+     * @param  array  $extra_headers Optional extra headers.
      * @return array  Args array for wp_remote_*.
      */
-    private function build_request_args( string $method = 'GET', array $body = [] ): array {
+    private function build_request_args( string $method = 'GET', array $body = [], array $extra_headers = [] ): array {
         $args = [
             'method'  => $method,
             'timeout' => self::TIMEOUT,
-            'headers' => [
+            'headers' => array_merge( [
                 'Authorization' => 'Basic ' . base64_encode( $this->api_key . ':' . $this->api_secret ),
                 'Content-Type'  => 'application/json',
                 'User-Agent'    => 'WooCommerce-Trendyol/' . WOO_TRENDYOL_VERSION,
                 'Accept'        => 'application/json',
-            ],
+            ], $extra_headers ),
         ];
 
-        // Attach storefront code header when set (required for order endpoints).
+        // Attach storefront code header when set (required for order endpoints and international marketplace).
         if ( ! empty( $this->storefront_code ) ) {
             $args['headers']['storefront-code'] = $this->storefront_code;
         }

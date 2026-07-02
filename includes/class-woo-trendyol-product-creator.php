@@ -443,6 +443,10 @@ class Woo_Trendyol_Product_Creator {
 
         // ---- Required attributes ----
         $attributes = $this->attribute_mapper->build_attributes( $product, $category_id, $term_id );
+        
+        if ( is_wp_error( $attributes ) ) {
+            return $attributes;
+        }
 
         // ---- Assemble payload ----
         $payload = [

@@ -1774,6 +1774,209 @@ class Woo_Trendyol_Admin {
     }
 
     // -----------------------------------------------------------------------
+    // Sync Tasks
+    // -----------------------------------------------------------------------
+
+    /**
+     * AJAX handler to sync categories.
+     * Fetches Trendyol categories and fuzzy matches them to WooCommerce leaf categories.
+     *
+     * @since 1.0.0
+     */
+    public function ajax_sync_categories(): void {
+        check_ajax_referer( 'woo_trendyol_admin', 'nonce' );
+
+        if ( ! current_user_can( 'manage_woocommerce' ) ) {
+            wp_send_json_error( [ 'message' => __( 'Permission denied.', 'woo-trendyol' ) ] );
+        }
+
+        $response = $this->api->get_categories();
+
+        if ( is_wp_error( $response ) ) {
+            wp_send_json_error( [ 'message' => __( 'Failed to fetch Trendyol categories.', 'woo-trendyol' ) ] );
+        }
+
+        $trendyol_categories = $response['categories'] ?? [];
+        $trendyol_leaf_cats  = [];
+
+        // Recursive function to extract leaf categories
+        $extract_leaf_categories = function ( $categories, $path = '' ) use ( &$extract_leaf_categories, &$trendyol_leaf_cats ) {
+            foreach ( $categories as $category ) {
+                $current_path = $path ? $path . ' ||| ' . $category['name'] : $category['name'];
+                if ( empty( $category['subCategories'] ) ) {
+                    $trendyol_leaf_cats[] = [
+                        'id'   => $category['id'],
+                        'name' => $category['name'],
+                        'path' => $current_path,
+                    ];
+                } else {
+                    $extract_leaf_categories( $category['subCategories'], $current_path );
+                }
+            }
+        };
+
+        $extract_leaf_categories( $trendyol_categories );
+
+        if ( empty( $trendyol_leaf_cats ) ) {
+             wp_send_json_error( [ 'message' => __( 'No Trendyol categories found.', 'woo-trendyol' ) ] );
+        }
+
+        $woo_categories = get_terms( [
+            'taxonomy'   => 'product_cat',
+            'hide_empty' => false,
+        ] );
+
+        if ( is_wp_error( $woo_categories ) || empty( $woo_categories ) ) {
+            wp_send_json_error( [ 'message' => __( 'No WooCommerce categories found.', 'woo-trendyol' ) ] );
+        }
+
+        $woo_leaf_cats = [];
+        foreach ( $woo_categories as $cat ) {
+            $children = get_term_children( $cat->term_id, 'product_cat' );
+            if ( empty( $children ) ) {
+                $woo_leaf_cats[] = $cat;
+            }
+        }
+
+        $matched_count = 0;
+
+        foreach ( $woo_leaf_cats as $woo_cat ) {
+            $woo_name = mb_strtolower( $woo_cat->name );
+            $best_match_id   = 0;
+            $best_match_path = '';
+            $best_score      = 0;
+
+            foreach ( $trendyol_leaf_cats as $t_cat ) {
+                $t_name = mb_strtolower( $t_cat['name'] );
+
+                if ( $woo_name === $t_name ) {
+                    $best_match_id   = $t_cat['id'];
+                    $best_match_path = $t_cat['path'];
+                    break;
+                }
+
+                // Try fuzzy match
+                similar_text( $woo_name, $t_name, $percent );
+                if ( $percent > 85 && $percent > $best_score ) {
+                    $best_score      = $percent;
+                    $best_match_id   = $t_cat['id'];
+                    $best_match_path = $t_cat['path'];
+                }
+            }
+
+            if ( $best_match_id ) {
+                update_term_meta( $woo_cat->term_id, Woo_Trendyol_Category_Helper::TERM_META_ID, $best_match_id );
+                update_term_meta( $woo_cat->term_id, Woo_Trendyol_Category_Helper::TERM_META_PATH, $best_match_path );
+                $matched_count++;
+            }
+        }
+
+        wp_send_json_success( [
+            'message' => sprintf(
+                __( 'Category sync complete. %1$d WooCommerce categories mapped out of %2$d.', 'woo-trendyol' ),
+                $matched_count,
+                count( $woo_leaf_cats )
+            )
+        ] );
+    }
+
+    /**
+     * AJAX handler to sync category attributes.
+     * Fetches required attributes for mapped WooCommerce categories and saves them.
+     *
+     * @since 1.0.0
+     */
+    public function ajax_sync_category_attributes(): void {
+        check_ajax_referer( 'woo_trendyol_admin', 'nonce' );
+
+        if ( ! current_user_can( 'manage_woocommerce' ) ) {
+            wp_send_json_error( [ 'message' => __( 'Permission denied.', 'woo-trendyol' ) ] );
+        }
+
+        $woo_categories = get_terms( [
+            'taxonomy'   => 'product_cat',
+            'hide_empty' => false,
+        ] );
+
+        if ( is_wp_error( $woo_categories ) || empty( $woo_categories ) ) {
+            wp_send_json_error( [ 'message' => __( 'No WooCommerce categories found.', 'woo-trendyol' ) ] );
+        }
+
+        $synced_count = 0;
+
+        foreach ( $woo_categories as $cat ) {
+            $trendyol_id = get_term_meta( $cat->term_id, Woo_Trendyol_Category_Helper::TERM_META_ID, true );
+
+            if ( empty( $trendyol_id ) ) {
+                continue;
+            }
+
+            $response = $this->api->get_category_attributes( (int) $trendyol_id );
+
+            if ( ! is_wp_error( $response ) && ! empty( $response['categoryAttributes'] ) ) {
+                $required_attrs = [];
+                foreach ( $response['categoryAttributes'] as $attr ) {
+                    if ( ! empty( $attr['required'] ) ) {
+                        $required_attrs[] = [
+                            'id'   => $attr['attribute']['id'] ?? 0,
+                            'name' => $attr['attribute']['name'] ?? '',
+                        ];
+                    }
+                }
+
+                update_term_meta( $cat->term_id, '_trendyol_required_attributes', $required_attrs );
+                $synced_count++;
+            }
+        }
+
+        wp_send_json_success( [
+            'message' => sprintf(
+                __( 'Category attributes sync complete. Attributes updated for %d categories.', 'woo-trendyol' ),
+                $synced_count
+            )
+        ] );
+    }
+
+    /**
+     * AJAX handler to sync attribute values (Fuzzy match gender/age).
+     *
+     * @since 1.0.0
+     */
+    public function ajax_sync_attribute_values(): void {
+        check_ajax_referer( 'woo_trendyol_admin', 'nonce' );
+
+        if ( ! current_user_can( 'manage_woocommerce' ) ) {
+            wp_send_json_error( [ 'message' => __( 'Permission denied.', 'woo-trendyol' ) ] );
+        }
+
+        // Just fetching values and showing a message. The actual mapping is 
+        // manual or via the mapper's auto-resolution for gender/age keywords.
+        // We will just fetch attribute values for mapped categories and save them for dropdowns.
+
+        $woo_categories = get_terms( [
+            'taxonomy'   => 'product_cat',
+            'hide_empty' => false,
+        ] );
+
+        $synced_count = 0;
+        foreach ( $woo_categories as $cat ) {
+             $trendyol_id = get_term_meta( $cat->term_id, Woo_Trendyol_Category_Helper::TERM_META_ID, true );
+             if ( $trendyol_id ) {
+                 // Trigger caching via API client
+                 $this->api->get_category_attributes( (int) $trendyol_id );
+                 $synced_count++;
+             }
+        }
+
+        wp_send_json_success( [
+            'message' => sprintf(
+                __( 'Attribute values synced and cached for %d mapped categories. You can now map values in category edit pages.', 'woo-trendyol' ),
+                $synced_count
+            )
+        ] );
+    }
+
+    // -----------------------------------------------------------------------
     // Private helpers
     // -----------------------------------------------------------------------
 

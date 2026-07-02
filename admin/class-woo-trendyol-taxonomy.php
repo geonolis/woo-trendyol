@@ -153,6 +153,15 @@ class Woo_Trendyol_Taxonomy {
         $trendyol_id   = (string) get_term_meta( $term->term_id, 'trendyol_category_id',   true );
         $trendyol_path = (string) get_term_meta( $term->term_id, 'trendyol_category_path', true );
 
+        $required_attributes = get_term_meta( $term->term_id, '_trendyol_required_attributes', true );
+        $required_attributes = is_array( $required_attributes ) ? $required_attributes : [];
+
+        $attribute_mappings = get_term_meta( $term->term_id, '_trendyol_attribute_mappings', true );
+        $attribute_mappings = is_array( $attribute_mappings ) ? $attribute_mappings : [];
+
+        // We also need all WooCommerce attributes to populate dropdowns
+        $woo_attributes = wc_get_attribute_taxonomies();
+
         include WOO_TRENDYOL_PATH . 'admin/partials/woo-trendyol-taxonomy-edit.php';
     }
 
@@ -190,6 +199,21 @@ class Woo_Trendyol_Taxonomy {
         if ( isset( $_POST['trendyol_category_path'] ) ) {
             $category_path = sanitize_text_field( wp_unslash( $_POST['trendyol_category_path'] ) );
             update_term_meta( $term_id, 'trendyol_category_path', $category_path );
+        }
+
+        // Save attribute mappings.
+        if ( isset( $_POST['trendyol_attribute_mappings'] ) && is_array( $_POST['trendyol_attribute_mappings'] ) ) {
+            $mappings = [];
+            foreach ( $_POST['trendyol_attribute_mappings'] as $attr_id => $woo_attr ) {
+                $attr_id = absint( $attr_id );
+                $woo_attr = sanitize_text_field( wp_unslash( $woo_attr ) );
+                if ( ! empty( $woo_attr ) ) {
+                    $mappings[ $attr_id ] = $woo_attr;
+                }
+            }
+            update_term_meta( $term_id, '_trendyol_attribute_mappings', $mappings );
+        } else {
+            delete_term_meta( $term_id, '_trendyol_attribute_mappings' );
         }
     }
 }

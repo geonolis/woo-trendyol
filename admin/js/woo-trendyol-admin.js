@@ -71,6 +71,7 @@
         initBrandSearch();
         initAttrMapping();
         initSendToTrendyol();
+        initSyncTasks();
     } );
 
     // =========================================================================
@@ -1027,6 +1028,42 @@
     function serializeMappingTable( slot ) {
         var map = getCurrentMap( slot );
         $( '#wt-map-hidden-' + slot ).val( JSON.stringify( map ) );
+    }
+
+    // =========================================================================
+    // Sync Tasks
+    // =========================================================================
+
+    function initSyncTasks() {
+        $( '.wt-run-sync-btn' ).on( 'click', function () {
+            var $btn     = $( this );
+            var action   = $btn.data( 'action' );
+            var $spinner = $btn.siblings( '.spinner' );
+            var $result  = $btn.siblings( '.wt-sync-result' );
+
+            $btn.prop( 'disabled', true );
+            $spinner.addClass( 'is-active' );
+            $result.hide().removeClass( 'wt-notice--success wt-notice--error' ).empty();
+
+            $.post( wooTrendyolAdmin.ajaxUrl, {
+                action: action,
+                nonce:  wooTrendyolAdmin.nonce
+            } )
+            .done( function ( response ) {
+                if ( response.success ) {
+                    $result.addClass( 'wt-notice--success' ).html( response.data.message ).show();
+                } else {
+                    $result.addClass( 'wt-notice--error' ).html( response.data.message || 'An error occurred.' ).show();
+                }
+            } )
+            .fail( function () {
+                $result.addClass( 'wt-notice--error' ).html( 'Request failed. Check your API credentials and connection.' ).show();
+            } )
+            .always( function () {
+                $btn.prop( 'disabled', false );
+                $spinner.removeClass( 'is-active' );
+            } );
+        } );
     }
 
 } )( jQuery );

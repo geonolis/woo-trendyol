@@ -70,5 +70,40 @@ $display_path = ! empty( $trendyol_path )
             </p>
         </div>
 
+        <?php if ( ! empty( $required_attributes ) ) : ?>
+            <div class="wt-taxonomy-attributes-box" style="margin-top: 20px;">
+                <hr>
+                <h4><?php esc_html_e( 'Required Trendyol Attributes', 'woo-trendyol' ); ?></h4>
+                <p class="description">
+                    <?php esc_html_e( 'Map the required Trendyol attributes to your WooCommerce product attributes. Global mappings (like Gender and Age) are applied automatically if set up in the main settings.', 'woo-trendyol' ); ?>
+                </p>
+                <table class="form-table">
+                    <?php foreach ( $required_attributes as $attr ) : 
+                        $attr_id = $attr['id'];
+                        $attr_name = $attr['name'];
+                        $current_mapping = $attribute_mappings[ $attr_id ] ?? '';
+                    ?>
+                        <tr>
+                            <th scope="row">
+                                <label for="trendyol_attr_<?php echo esc_attr( $attr_id ); ?>">
+                                    <?php echo esc_html( $attr_name ); ?>
+                                </label>
+                            </th>
+                            <td>
+                                <select name="trendyol_attribute_mappings[<?php echo esc_attr( $attr_id ); ?>]" id="trendyol_attr_<?php echo esc_attr( $attr_id ); ?>">
+                                    <option value=""><?php esc_html_e( '-- Select WooCommerce Attribute --', 'woo-trendyol' ); ?></option>
+                                    <?php foreach ( $woo_attributes as $woo_attr ) : ?>
+                                        <option value="<?php echo esc_attr( 'pa_' . $woo_attr->attribute_name ); ?>" <?php selected( $current_mapping, 'pa_' . $woo_attr->attribute_name ); ?>>
+                                            <?php echo esc_html( $woo_attr->attribute_label ); ?>
+                                        </option>
+                                    <?php endforeach; ?>
+                                </select>
+                            </td>
+                        </tr>
+                    <?php endforeach; ?>
+                </table>
+            </div>
+        <?php endif; ?>
+
     </td>
 </tr>

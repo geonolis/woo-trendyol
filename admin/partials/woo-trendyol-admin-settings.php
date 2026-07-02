@@ -20,6 +20,7 @@ $tabs = [
     'credentials' => __( 'API Credentials &amp; Connection', 'woo-trendyol' ),
     'defaults'    => __( 'Product Defaults', 'woo-trendyol' ),
     'attributes'  => __( 'Global Attribute Mappings', 'woo-trendyol' ),
+    'sync'        => __( 'Synchronization', 'woo-trendyol' ),
 ];
 ?>
 <div class="wrap woo-trendyol-settings-wrap">
@@ -67,6 +68,9 @@ $tabs = [
                         break;
                     case 'attributes':
                         echo '<span class="dashicons dashicons-tag"></span> ';
+                        break;
+                    case 'sync':
+                        echo '<span class="dashicons dashicons-update"></span> ';
                         break;
                 }
                 echo wp_kses_post( $label );
@@ -193,6 +197,66 @@ $tabs = [
                     </table>
 
                     <?php submit_button( __( 'Save Attribute Mappings', 'woo-trendyol' ) ); ?>
+
+                <?php elseif ( 'sync' === $active_tab ) : ?>
+                    <!-- ================================================== -->
+                    <!-- TAB 4: Synchronization                               -->
+                    <!-- ================================================== -->
+                    <div class="wt-tab-header">
+                        <h2>
+                            <span class="dashicons dashicons-update"></span>
+                            <?php esc_html_e( 'Synchronization', 'woo-trendyol' ); ?>
+                        </h2>
+                        <p class="wt-tab-desc">
+                            <?php esc_html_e( 'Run these synchronization tasks to keep your WooCommerce store aligned with Trendyol\'s catalogue. Following Trendyol V2 Best Practices, you should sync brands and categories before mapping attributes.', 'woo-trendyol' ); ?>
+                        </p>
+                    </div>
+
+                    <div class="wt-sync-tasks">
+                        <!-- Task 1: Sync Brands -->
+                        <div class="wt-sync-task-card wt-card">
+                            <h3>1. <?php esc_html_e( 'Sync Brands', 'woo-trendyol' ); ?></h3>
+                            <p class="description"><?php esc_html_e( 'Fetches brands from Trendyol and attempts to automatically map them to your WooCommerce product brands.', 'woo-trendyol' ); ?></p>
+                            <button type="button" class="button button-secondary wt-run-sync-btn" data-action="trendyol_sync_brands">
+                                <span class="dashicons dashicons-update-alt"></span> <?php esc_html_e( 'Run Brand Sync', 'woo-trendyol' ); ?>
+                            </button>
+                            <span class="spinner" style="float:none;vertical-align:middle;margin-left:5px;"></span>
+                            <div class="wt-sync-result"></div>
+                        </div>
+
+                        <!-- Task 2: Sync Categories -->
+                        <div class="wt-sync-task-card wt-card">
+                            <h3>2. <?php esc_html_e( 'Sync Categories', 'woo-trendyol' ); ?></h3>
+                            <p class="description"><?php esc_html_e( 'Fuzzy matches your WooCommerce leaf-level categories to Trendyol categories. You can review matches on the WooCommerce category edit page.', 'woo-trendyol' ); ?></p>
+                            <button type="button" class="button button-secondary wt-run-sync-btn" data-action="trendyol_sync_categories">
+                                <span class="dashicons dashicons-update-alt"></span> <?php esc_html_e( 'Run Category Sync', 'woo-trendyol' ); ?>
+                            </button>
+                            <span class="spinner" style="float:none;vertical-align:middle;margin-left:5px;"></span>
+                            <div class="wt-sync-result"></div>
+                        </div>
+
+                        <!-- Task 3: Sync Category Attributes -->
+                        <div class="wt-sync-task-card wt-card">
+                            <h3>3. <?php esc_html_e( 'Sync Category Attributes', 'woo-trendyol' ); ?></h3>
+                            <p class="description"><?php esc_html_e( 'Fetches required attributes for all your mapped categories and stores them. Run this after mapping categories.', 'woo-trendyol' ); ?></p>
+                            <button type="button" class="button button-secondary wt-run-sync-btn" data-action="trendyol_sync_category_attributes">
+                                <span class="dashicons dashicons-update-alt"></span> <?php esc_html_e( 'Run Attribute Sync', 'woo-trendyol' ); ?>
+                            </button>
+                            <span class="spinner" style="float:none;vertical-align:middle;margin-left:5px;"></span>
+                            <div class="wt-sync-result"></div>
+                        </div>
+
+                        <!-- Task 4: Sync Attribute Values (Fuzzy Match) -->
+                        <div class="wt-sync-task-card wt-card">
+                            <h3>4. <?php esc_html_e( 'Sync Attribute Values (Gender/Age)', 'woo-trendyol' ); ?></h3>
+                            <p class="description"><?php esc_html_e( 'Automatically fuzzy matches Trendyol gender and age values to your global WooCommerce attributes. Other required attributes must be mapped manually on the category edit page.', 'woo-trendyol' ); ?></p>
+                            <button type="button" class="button button-secondary wt-run-sync-btn" data-action="trendyol_sync_attribute_values">
+                                <span class="dashicons dashicons-update-alt"></span> <?php esc_html_e( 'Run Value Sync', 'woo-trendyol' ); ?>
+                            </button>
+                            <span class="spinner" style="float:none;vertical-align:middle;margin-left:5px;"></span>
+                            <div class="wt-sync-result"></div>
+                        </div>
+                    </div>
 
                 <?php endif; ?>
 
