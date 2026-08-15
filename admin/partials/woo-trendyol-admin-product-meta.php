@@ -106,6 +106,33 @@ if ( 'success' === $sync_status ) {
                 </p>
             <?php endif; ?>
         </div>
+
+        <!-- Price Settings & Override -->
+        <div class="wt-override-field" style="margin-top: 15px;">
+            <label for="_trendyol_price_override">
+                <strong><?php esc_html_e( 'Price Override', 'woo-trendyol' ); ?></strong>
+            </label>
+            <input type="number"
+                   step="0.01"
+                   id="_trendyol_price_override"
+                   name="_trendyol_price_override"
+                   value="<?php echo esc_attr( $price_override ); ?>"
+                   class="short-text"
+                   placeholder="<?php esc_attr_e( 'e.g. 29.99', 'woo-trendyol' ); ?>" /> &euro;
+            <p class="description">
+                <?php esc_html_e( 'Enter a specific price for Trendyol. If set, this price will override the global price rules and category-level rules.', 'woo-trendyol' ); ?>
+            </p>
+        </div>
+
+        <div class="wt-calculated-price-display" style="margin-top: 15px; padding: 10px; background: #f9f9f9; border-left: 4px solid #11a0d2;">
+            <strong><?php esc_html_e( 'Calculated Trendyol Price:', 'woo-trendyol' ); ?></strong>
+            <span style="font-size: 14px; font-weight: bold; margin-left: 5px; color: #11a0d2;">
+                <?php echo wp_kses_post( $calculated_price_display ); ?>
+            </span>
+            <p class="description" style="margin-top: 3px;">
+                <?php esc_html_e( 'The actual price that will be submitted to Trendyol, based on active global rules, category extra percentage, and overrides.', 'woo-trendyol' ); ?>
+            </p>
+        </div>
     </div>
 
     <hr class="wt-divider" />

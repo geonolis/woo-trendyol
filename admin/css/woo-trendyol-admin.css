@@ -540,6 +540,150 @@
     color: #666;
 }
 
+/* =========================================================
+   Global Attribute Mappings Accordion UI
+   ========================================================= */
+.wt-accordion-toolbar {
+    margin-top: 15px;
+    margin-bottom: 15px;
+    display: flex;
+    gap: 8px;
+    align-items: center;
+}
+
+.wt-attr-mapping-form-table {
+    border-collapse: separate !important;
+    border-spacing: 0 !important;
+    margin-top: 10px;
+    width: 100%;
+}
+
+.wt-attr-mapping-form-table tbody tr {
+    display: block;
+    background: #ffffff;
+    border: 1px solid #c3c4c7;
+    border-radius: 6px;
+    margin-bottom: 12px;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
+    overflow: hidden;
+    transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.wt-attr-mapping-form-table tbody tr:hover {
+    border-color: #2271b1;
+    box-shadow: 0 2px 6px rgba(34, 113, 177, 0.12);
+}
+
+.wt-attr-mapping-form-table th,
+.wt-attr-mapping-form-table th *,
+.wt-accordion-header-left,
+.wt-accordion-header-right,
+.wt-accordion-title {
+    cursor: pointer !important;
+}
+
+.wt-attr-mapping-form-table th {
+    display: flex !important;
+    align-items: center;
+    justify-content: space-between;
+    width: 100% !important;
+    box-sizing: border-box;
+    padding: 10px 16px !important;
+    background: #f8f9fa;
+    user-select: none;
+    border-bottom: 1px solid #e2e4e7;
+    margin: 0;
+    gap: 15px;
+    transition: background 0.15s ease;
+}
+
+.wt-attr-mapping-form-table th:hover {
+    background: #f0f6fc;
+}
+
+.wt-attr-mapping-form-table tr.wt-accordion-closed th {
+    border-bottom: none;
+}
+
+.wt-accordion-header-left {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 14px;
+    color: #1d2327;
+    cursor: pointer !important;
+    min-width: 160px;
+    flex-shrink: 0;
+}
+
+.wt-accordion-header-left:hover {
+    color: #2271b1;
+}
+
+.wt-accordion-header-center {
+    flex-grow: 1;
+    display: flex;
+    align-items: center;
+    cursor: default !important;
+}
+
+.wt-accordion-header-center select {
+    max-width: 340px;
+    width: 100%;
+    margin: 0 !important;
+    cursor: pointer !important;
+}
+
+.wt-accordion-header-right {
+    display: flex;
+    align-items: center;
+    flex-shrink: 0;
+}
+
+.wt-accordion-toggle-btn {
+    cursor: pointer !important;
+    font-size: 12px !important;
+    line-height: 26px !important;
+    height: 28px !important;
+    padding: 0 12px !important;
+}
+
+.wt-attr-mapping-label {
+    display: none;
+}
+
+.wt-attr-status-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 3px 10px;
+    border-radius: 12px;
+    font-size: 12px;
+    font-weight: 500;
+}
+
+.wt-status-mapped {
+    background: #e7f8ed;
+    color: #0f834d;
+    border: 1px solid #b7ebc9;
+}
+
+.wt-status-unmapped {
+    background: #f0f0f1;
+    color: #646970;
+    border: 1px solid #dcdcde;
+}
+
+.wt-attr-mapping-form-table td {
+    display: block;
+    padding: 16px 20px !important;
+    background: #ffffff;
+}
+
+.wt-attr-mapping-form-table tr.wt-accordion-closed td {
+    display: none;
+}
+
 .wt-attr-mapping-field {
     width: 100%;
 }
@@ -1180,3 +1324,20 @@
 .wt-total--submitted { color: #2271b1; }
 .wt-total--skipped   { color: #996800; }
 .wt-total--approved  { color: #00a32a; }
+
+/* Custom columns in taxonomy tables */
+.wp-list-table .column-trendyol_mapped_cat {
+    width: 28%;
+    min-width: 250px;
+}
+.wp-list-table .column-trendyol_mapped_cat .trendyol-mapped-path {
+    font-weight: 500;
+    display: inline-block;
+}
+.wp-list-table .column-trendyol_mapped_cat .trendyol-mapped-id {
+    color: #666;
+    background: #f0f0f1;
+    padding: 1px 4px;
+    border-radius: 3px;
+    font-size: 11px;
+}

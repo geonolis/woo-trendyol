@@ -21,6 +21,8 @@ $tabs = [
     'defaults'    => __( 'Product Defaults', 'woo-trendyol' ),
     'attributes'  => __( 'Global Attribute Mappings', 'woo-trendyol' ),
     'sync'        => __( 'Synchronization', 'woo-trendyol' ),
+    'price_rules' => __( 'Price Rules', 'woo-trendyol' ),
+    'tools'       => __( 'Tools', 'woo-trendyol' ),
 ];
 ?>
 <div class="wrap woo-trendyol-settings-wrap">
@@ -38,6 +40,8 @@ $tabs = [
         settings_errors( 'woo_trendyol_defaults_settings' );
     } elseif ( 'attributes' === $active_tab ) {
         settings_errors( 'woo_trendyol_attrs_settings' );
+    } elseif ( 'price_rules' === $active_tab ) {
+        settings_errors( 'woo_trendyol_price_rules_settings' );
     }
     ?>
 
@@ -72,6 +76,12 @@ $tabs = [
                     case 'sync':
                         echo '<span class="dashicons dashicons-update"></span> ';
                         break;
+                    case 'price_rules':
+                        echo '<span class="dashicons dashicons-money-alt"></span> ';
+                        break;
+                    case 'tools':
+                        echo '<span class="dashicons dashicons-admin-tools"></span> ';
+                        break;
                 }
                 echo wp_kses_post( $label );
                 ?>
@@ -91,6 +101,8 @@ $tabs = [
                     settings_fields( 'woo_trendyol_defaults_settings' );
                 } elseif ( 'attributes' === $active_tab ) {
                     settings_fields( 'woo_trendyol_attrs_settings' );
+                } elseif ( 'price_rules' === $active_tab ) {
+                    settings_fields( 'woo_trendyol_price_rules_settings' );
                 }
                 ?>
                 <!-- Preserve active tab through form submission -->
@@ -160,35 +172,39 @@ $tabs = [
                             <?php esc_html_e( 'Global Attribute Mappings', 'woo-trendyol' ); ?>
                         </h2>
                         <p class="wt-tab-desc">
-                            <?php esc_html_e( 'Map WooCommerce attributes to their Trendyol equivalents. These global mappings are applied first, before per-category or per-product attribute mappings. Optional attributes are always omitted.', 'woo-trendyol' ); ?>
+                            <?php esc_html_e( 'Map WooCommerce attributes to their Trendyol equivalents. These global mappings are applied automatically across all categories. Dynamic attributes appearing as required in 2 or more mapped categories are listed below.', 'woo-trendyol' ); ?>
                         </p>
                         <p class="wt-tab-desc">
-                            <?php echo wp_kses_post( __( 'For <strong>Gender</strong> and <strong>Age Group</strong>: first select the WooCommerce attribute that holds those values, then map each Trendyol value to one or more of your WooCommerce terms. Age supports many-to-one mapping (e.g. "από 3 ετών" and "από 4 ετών" can both map to the Trendyol "3-4 Yaş" value).', 'woo-trendyol' ) ); ?>
+                            <?php echo wp_kses_post( __( 'First select the WooCommerce attribute, then map each Trendyol value to one or more of your WooCommerce terms.', 'woo-trendyol' ) ); ?>
                         </p>
                     </div>
 
                     <!-- Category loader for fetching Trendyol attribute values -->
                     <div class="wt-attr-category-loader wt-card wt-card--loader">
-                        <h3><?php esc_html_e( 'Load Trendyol Attribute Values', 'woo-trendyol' ); ?></h3>
+                        <h3><?php esc_html_e( 'Load Dynamic Global Attributes', 'woo-trendyol' ); ?></h3>
                         <p class="description">
-                            <?php esc_html_e( 'Trendyol gender and age values are category-specific. Enter any leaf-level category ID from your catalogue to fetch the available values for mapping.', 'woo-trendyol' ); ?>
+                            <?php esc_html_e( 'Click to scan all mapped WooCommerce categories and dynamically discover required attributes. Then, load their values to map.', 'woo-trendyol' ); ?>
                         </p>
                         <div class="wt-loader-row">
-                            <label for="wt-attr-sample-category">
-                                <strong><?php esc_html_e( 'Trendyol Category ID:', 'woo-trendyol' ); ?></strong>
-                            </label>
-                            <input type="number"
-                                   id="wt-attr-sample-category"
-                                   class="small-text"
-                                   placeholder="<?php esc_attr_e( 'e.g. 1082', 'woo-trendyol' ); ?>"
-                                   min="1" />
-                            <button type="button" class="button button-secondary" id="wt-load-attr-values">
+                            <button type="button" class="button button-primary" id="wt-load-all-mapped-attr-values">
                                 <span class="dashicons dashicons-download"></span>
-                                <?php esc_html_e( 'Load Trendyol Values', 'woo-trendyol' ); ?>
+                                <?php esc_html_e( 'Load/Refresh Global Attributes', 'woo-trendyol' ); ?>
                             </button>
                             <span id="wt-attr-load-spinner" class="spinner" style="float:none;margin:0 4px;vertical-align:middle;"></span>
                         </div>
                         <div id="wt-attr-load-notice" style="display:none;"></div>
+                    </div>
+
+                    <!-- Attribute mapping accordion toolbar -->
+                    <div class="wt-accordion-toolbar">
+                        <button type="button" class="button button-secondary" id="wt-expand-all-attrs">
+                            <span class="dashicons dashicons-editor-expand" style="vertical-align: text-bottom; margin-right: 4px;"></span>
+                            <?php esc_html_e( 'Expand All', 'woo-trendyol' ); ?>
+                        </button>
+                        <button type="button" class="button button-secondary" id="wt-collapse-all-attrs">
+                            <span class="dashicons dashicons-editor-contract" style="vertical-align: text-bottom; margin-right: 4px;"></span>
+                            <?php esc_html_e( 'Collapse All', 'woo-trendyol' ); ?>
+                        </button>
                     </div>
 
                     <!-- Attribute mapping fields -->
@@ -258,6 +274,27 @@ $tabs = [
                         </div>
                     </div>
 
+                <?php elseif ( 'price_rules' === $active_tab ) : ?>
+                    <!-- ================================================== -->
+                    <!-- TAB 5: Price Rules                                 -->
+                    <!-- ================================================== -->
+                    <div class="wt-tab-header">
+                        <h2>
+                            <span class="dashicons dashicons-money-alt"></span>
+                            <?php esc_html_e( 'Price Rules', 'woo-trendyol' ); ?>
+                        </h2>
+                        <p class="wt-tab-desc">
+                            <?php esc_html_e( 'Globally adjust product prices sent to Trendyol. Check the switches to activate and configure specific adjustments.', 'woo-trendyol' ); ?>
+                        </p>
+                    </div>
+
+                    <table class="form-table" role="presentation">
+                        <?php do_settings_fields( 'woo-trendyol-settings', 'woo_trendyol_price_rules_section' ); ?>
+                    </table>
+
+                    <?php submit_button( __( 'Save Price Rules', 'woo-trendyol' ) ); ?>
+                <?php elseif ( 'tools' === $active_tab ) : ?>
+                    <?php include WOO_TRENDYOL_PATH . 'admin/partials/woo-trendyol-admin-tools.php'; ?>
                 <?php endif; ?>
 
             </form>
@@ -301,6 +338,11 @@ $tabs = [
                         <input type="checkbox" id="wt-bulk-only-unmapped" />
                         <?php esc_html_e( 'Only products not yet sent to Trendyol', 'woo-trendyol' ); ?>
                     </label>
+                    <br>
+                    <label style="margin-top:5px; display:inline-block;">
+                        <input type="checkbox" id="wt-bulk-include-out-of-stock" />
+                        <?php esc_html_e( 'Send also products out of stock', 'woo-trendyol' ); ?>
+                    </label>
                 </div>
 
                 <!-- Action buttons row -->
@@ -317,6 +359,10 @@ $tabs = [
                         <span class="dashicons dashicons-controls-play"></span>
                         <?php esc_html_e( 'Resume', 'woo-trendyol' ); ?>
                     </button>
+                    <button type="button" id="wt-bulk-cancel" class="button button-secondary" style="display:none;">
+                        <span class="dashicons dashicons-no-alt"></span>
+                        <?php esc_html_e( 'Cancel', 'woo-trendyol' ); ?>
+                    </button>
                     <span class="spinner" id="wt-bulk-spinner" style="float:none;"></span>
                 </div>
 
@@ -326,6 +372,7 @@ $tabs = [
                         <div class="wt-progress-bar-fill" id="wt-bulk-progress-fill" style="width:0%"></div>
                     </div>
                     <p id="wt-bulk-progress-text" class="wt-progress-label">0 / 0</p>
+                    <div id="wt-bulk-current-ids" style="font-size: 11px; color: #666; margin-top: 4px; text-align: center;"></div>
                 </div>
 
                 <!-- Final totals (shown when complete) -->
@@ -354,6 +401,57 @@ $tabs = [
                 <div id="wt-bulk-results" class="wt-bulk-results" style="display:none; margin-top:8px;">
                     <h4><?php esc_html_e( 'Push Log', 'woo-trendyol' ); ?></h4>
                     <div id="wt-bulk-results-list" style="max-height:180px; overflow-y:auto;"></div>
+                </div>
+            </div>
+
+            <!-- Sync Price & Stock Tool -->
+            <div class="wt-card wt-card--sync-price-stock">
+                <h3><?php esc_html_e( 'Sync Price & Stock Only', 'woo-trendyol' ); ?></h3>
+                <p class="description">
+                    <?php esc_html_e( 'Quickly synchronize only price and inventory levels for your mapped products.', 'woo-trendyol' ); ?>
+                </p>
+
+                <div class="wt-bulk-filters">
+                    <label>
+                        <input type="checkbox" id="wt-sync-include-out-of-stock" />
+                        <?php esc_html_e( 'Sync also products out of stock', 'woo-trendyol' ); ?>
+                    </label>
+                </div>
+
+                <!-- Action buttons row -->
+                <div class="wt-bulk-action-row">
+                    <button type="button" id="wt-sync-price-stock" class="button button-primary">
+                        <span class="dashicons dashicons-update"></span>
+                        <?php esc_html_e( 'Sync Price & Stock', 'woo-trendyol' ); ?>
+                    </button>
+                    <button type="button" id="wt-sync-pause" class="button" style="display:none;">
+                        <span class="dashicons dashicons-controls-pause"></span>
+                        <?php esc_html_e( 'Pause', 'woo-trendyol' ); ?>
+                    </button>
+                    <button type="button" id="wt-sync-resume" class="button button-primary" style="display:none;">
+                        <span class="dashicons dashicons-controls-play"></span>
+                        <?php esc_html_e( 'Resume', 'woo-trendyol' ); ?>
+                    </button>
+                    <button type="button" id="wt-sync-cancel" class="button button-secondary" style="display:none;">
+                        <span class="dashicons dashicons-no-alt"></span>
+                        <?php esc_html_e( 'Cancel', 'woo-trendyol' ); ?>
+                    </button>
+                    <span class="spinner" id="wt-sync-spinner" style="float:none;"></span>
+                </div>
+
+                <!-- Progress bar -->
+                <div id="wt-sync-progress-wrap" style="display:none; margin-top:10px;">
+                    <div class="wt-progress-bar-track">
+                        <div class="wt-progress-bar-fill" id="wt-sync-progress-fill" style="width:0%"></div>
+                    </div>
+                    <p id="wt-sync-progress-text" class="wt-progress-label">0 / 0</p>
+                    <div id="wt-sync-current-ids" style="font-size: 11px; color: #666; margin-top: 4px; text-align: center;"></div>
+                </div>
+
+                <!-- Per-batch results log -->
+                <div id="wt-sync-results" class="wt-bulk-results" style="display:none; margin-top:8px;">
+                    <h4><?php esc_html_e( 'Sync Log', 'woo-trendyol' ); ?></h4>
+                    <div id="wt-sync-results-list" style="max-height:180px; overflow-y:auto;"></div>
                 </div>
             </div>
 

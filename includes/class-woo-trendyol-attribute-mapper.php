@@ -56,9 +56,18 @@ class Woo_Trendyol_Attribute_Mapper {
      */
     public const GLOBAL_ATTR_KEYWORDS = [
         'gender'    => [ 'cinsiyet', 'gender', 'φύλο' ],
-        'age'       => [ 'yaş', 'age', 'ηλικ' ],
-        'brand'     => [ 'marka', 'brand', 'μάρκα', 'manufacturer' ],
+        'age_group' => [ 'yaş grubu', 'age group', 'ηλικιακή ομάδα', 'ηλικιακη ομαδα' ],
+        'age'       => [ 'yaş', 'age', 'ηλικία' ],
+        'color'     => [ 'renk', 'color', 'χρώμα' ],
+        'brand'     => [ 'marka', 'brand', 'μάρκα', 'manufacturer', 'κατασκευαστ' ],
         'character' => [ 'karakter', 'character', 'χαρακτήρας', 'hero', 'license' ],
+    ];
+
+    public const GLOBAL_ATTR_NAMES = [
+        'gender'    => [ 'cinsiyet', 'gender', 'φύλο' ],
+        'age_group' => [ 'yaş grubu', 'age group', 'ηλικιακή ομάδα', 'ηλικιακη ομαδα' ],
+        'age'       => [ 'yaş', 'age', 'ηλικία' ],
+        'color'     => [ 'renk', 'color', 'χρώμα' ],
     ];
 
     /**
@@ -146,19 +155,25 @@ class Woo_Trendyol_Attribute_Mapper {
         // Load per-category attribute mapping from term meta.
         $category_map = $this->load_category_attribute_map( $term_id );
 
+        // Load per-category attribute value mapping from term meta.
+        $category_value_map = $this->load_category_attribute_value_map( $term_id );
+
         // Load WooCommerce product attributes (keyed by normalised slug).
         $wc_attributes = $this->load_wc_attributes( $product );
 
         $result = [];
 
         foreach ( $category_attributes as $cat_attr ) {
-            // Skip optional attributes entirely.
-            if ( empty( $cat_attr['required'] ) ) {
-                continue;
-            }
-
             $attr_id   = (int) ( $cat_attr['attribute']['id']   ?? 0 );
             $attr_name = (string) ( $cat_attr['attribute']['name'] ?? '' );
+            
+            $is_required = ! empty( $cat_attr['required'] );
+            $is_brand    = ( $this->get_global_slot( $attr_name ) === 'brand' );
+
+            // Skip optional attributes entirely unless they match the global brand slot.
+            if ( ! $is_required && ! $is_brand ) {
+                continue;
+            }
 
             if ( ! $attr_id ) {
                 continue;
@@ -175,13 +190,58 @@ class Woo_Trendyol_Attribute_Mapper {
                 $allow_custom,
                 $global_settings,
                 $category_map,
+                $category_value_map,
                 $wc_attributes,
                 $product
             );
 
+            // If color resolution failed, fall back to "Πολύχρωμο" (Multi-color)
+            if ( null === $resolved ) {
+                $is_color_attr = false;
+                $attr_name_lower = mb_strtolower( trim( $attr_name ) );
+                foreach ( self::GLOBAL_ATTR_NAMES['color'] as $keyword ) {
+                    if ( mb_stripos( $attr_name_lower, $keyword ) !== false ) {
+                        $is_color_attr = true;
+                        break;
+                    }
+                }
+
+                if ( $is_color_attr ) {
+                    if ( $allow_custom ) {
+                        $resolved = [ 'attributeId' => $attr_id, 'customAttributeValue' => 'Πολύχρωμο' ];
+                    } else {
+                        // Ensure we have values
+                        if ( empty( $attr_values ) ) {
+                            $values_res = $this->api->get_attribute_values( $category_id, $attr_id );
+                            if ( ! is_wp_error( $values_res ) && ! empty( $values_res['content'] ) ) {
+                                foreach ( $values_res['content'] as $v ) {
+                                    $attr_values[] = [
+                                        'id'   => (int) $v['attributeValueId'],
+                                        'name' => (string) $v['attributeValue'],
+                                    ];
+                                }
+                            }
+                        }
+
+                        // Search for match by name or ID
+                        foreach ( $attr_values as $av ) {
+                            $av_name_lower = mb_strtolower( trim( $av['name'] ) );
+                            if ( $av_name_lower === 'πολύχρωμο' || $av_name_lower === 'çok renkli' || $av['id'] == 686230 ) {
+                                $resolved = [ 'attributeId' => $attr_id, 'attributeValueId' => (int) $av['id'] ];
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+
             if ( null !== $resolved ) {
                 $result[] = $resolved;
             } else {
+                if ( ! $is_required ) {
+                    continue;
+                }
+
                 $error_message = sprintf(
                     __( 'Missing required attribute: "%s" (ID %d). Please map this attribute in the category settings or globally.', 'woo-trendyol' ),
                     $attr_name,
@@ -277,6 +337,7 @@ class Woo_Trendyol_Attribute_Mapper {
         bool $allow_custom,
         array $global_settings,
         array $category_map,
+        array $category_value_map,
         array $wc_attributes,
         WC_Product $product
     ): ?array {
@@ -285,6 +346,20 @@ class Woo_Trendyol_Attribute_Mapper {
         $mapped_wc_slug = $category_map[ (string) $attr_id ] ?? null;
 
         if ( $mapped_wc_slug ) {
+            // First check if there is a category-level value mapping defined for this attribute
+            // and the product's value for the WooCommerce attribute.
+            $product_slugs = $this->get_product_term_slugs( $product, $mapped_wc_slug );
+            $value_map = $category_value_map[ $attr_id ] ?? [];
+
+            if ( ! empty( $value_map ) && ! empty( $product_slugs ) ) {
+                foreach ( $product_slugs as $slug ) {
+                    if ( isset( $value_map[ $slug ] ) ) {
+                        return [ 'attributeId' => $attr_id, 'attributeValueId' => (int) $value_map[ $slug ] ];
+                    }
+                }
+            }
+
+            // Fall back to exact name matching if no custom value mapping was found
             $normalised_slug = $this->normalise_slug( $mapped_wc_slug );
             $wc_value        = $wc_attributes[ $normalised_slug ] ?? null;
 
@@ -293,8 +368,79 @@ class Woo_Trendyol_Attribute_Mapper {
             }
         }
 
-        // --- Priority 2: Global settings ---
+        // --- Priority 2: Dynamic Global settings ---
+        $dyn_wc_slug = get_option( 'trendyol_global_attr_' . $attr_id . '_wc', '' );
+        if ( ! empty( $dyn_wc_slug ) ) {
+            $dyn_product_slugs = $this->get_product_term_slugs( $product, $dyn_wc_slug );
+            if ( ! empty( $dyn_product_slugs ) ) {
+                $raw_map = get_option( 'trendyol_global_attr_' . $attr_id . '_map', '' );
+                $dyn_value_map = [];
+                if ( $raw_map ) {
+                    $decoded = json_decode( $raw_map, true );
+                    $dyn_value_map = is_array( $decoded ) ? $decoded : [];
+                }
+
+                $is_term_key_map = false;
+                if ( ! empty( $dyn_value_map ) ) {
+                    $first_val = reset( $dyn_value_map );
+                    if ( ! is_array( $first_val ) ) {
+                        $is_term_key_map = true; // Format: { "term_slug": "ty_id" }
+                    }
+                }
+
+                if ( $is_term_key_map ) {
+                    foreach ( $dyn_product_slugs as $slug ) {
+                        if ( isset( $dyn_value_map[ $slug ] ) && ! empty( $dyn_value_map[ $slug ] ) ) {
+                            return [ 'attributeId' => $attr_id, 'attributeValueId' => (int) $dyn_value_map[ $slug ] ];
+                        }
+                    }
+                } else {
+                    // Format: { "ty_id": ["slug1", "slug2"] }
+                    foreach ( $dyn_product_slugs as $slug ) {
+                        foreach ( $dyn_value_map as $ty_val_id => $mapped_slugs ) {
+                            if ( in_array( $slug, (array) $mapped_slugs, true ) ) {
+                                return [ 'attributeId' => $attr_id, 'attributeValueId' => (int) $ty_val_id ];
+                            }
+                        }
+                    }
+                }
+
+                if ( $allow_custom ) {
+                    if ( 'dim_length' === $dyn_wc_slug ) {
+                        $val = (string) $product->get_length();
+                        if ( '' !== $val ) { return [ 'attributeId' => $attr_id, 'customAttributeValue' => $val ]; }
+                    } elseif ( 'dim_width' === $dyn_wc_slug ) {
+                        $val = (string) $product->get_width();
+                        if ( '' !== $val ) { return [ 'attributeId' => $attr_id, 'customAttributeValue' => $val ]; }
+                    } elseif ( 'dim_height' === $dyn_wc_slug ) {
+                        $val = (string) $product->get_height();
+                        if ( '' !== $val ) { return [ 'attributeId' => $attr_id, 'customAttributeValue' => $val ]; }
+                    } elseif ( 'dim_weight' === $dyn_wc_slug ) {
+                        $val = (string) $product->get_weight();
+                        if ( '' !== $val ) { return [ 'attributeId' => $attr_id, 'customAttributeValue' => $val ]; }
+                    } elseif ( 0 === strpos( $dyn_wc_slug, 'meta:' ) ) {
+                        $meta_key = substr( $dyn_wc_slug, 5 );
+                        $val = (string) get_post_meta( $product->get_id(), $meta_key, true );
+                        if ( '' !== $val ) { return [ 'attributeId' => $attr_id, 'customAttributeValue' => $val ]; }
+                    } else {
+                        $term_names = wp_get_post_terms( $product->get_id(), $dyn_wc_slug, [ 'fields' => 'names' ] );
+                        if ( ! is_wp_error( $term_names ) && ! empty( $term_names ) ) {
+                            return [ 'attributeId' => $attr_id, 'customAttributeValue' => $term_names[0] ];
+                        }
+                        $attr_val = $product->get_attribute( $dyn_wc_slug );
+                        if ( ! empty( $attr_val ) ) {
+                            return [ 'attributeId' => $attr_id, 'customAttributeValue' => $attr_val ];
+                        }
+                    }
+                }
+            }
+        }
+
+        // --- Priority 2.5: Legacy Global settings (Brand/Character) ---
         $global_slot = $this->get_global_slot( $attr_name );
+        if ( 'color' === $global_slot && $allow_custom ) {
+            $global_slot = 'color_custom';
+        }
 
         if ( $global_slot ) {
             $resolved = $this->resolve_from_global(
@@ -350,8 +496,41 @@ class Woo_Trendyol_Attribute_Mapper {
         WC_Product $product
     ): ?array {
         switch ( $slot ) {
+            case 'color_custom':
+                $wc_slug = $global_settings['color_custom_wc'] ?? '';
+                if ( empty( $wc_slug ) ) {
+                    break;
+                }
+                $term_names = wp_get_post_terms( $product->get_id(), $wc_slug, [ 'fields' => 'names' ] );
+                if ( ! is_wp_error( $term_names ) && ! empty( $term_names ) ) {
+                    return [ 'attributeId' => $attr_id, 'customAttributeValue' => $term_names[0] ];
+                }
+                break;
+
+            case 'color':
+                $wc_slug  = $global_settings[ $slot . '_wc' ]  ?? '';
+                $value_map = $global_settings[ $slot . '_map' ] ?? [];
+
+                if ( empty( $wc_slug ) || empty( $value_map ) ) {
+                    break;
+                }
+
+                $product_slugs = $this->get_product_term_slugs( $product, $wc_slug );
+
+                if ( empty( $product_slugs ) ) {
+                    break;
+                }
+
+                foreach ( $product_slugs as $slug ) {
+                    if ( isset( $value_map[ $slug ] ) && ! empty( $value_map[ $slug ] ) ) {
+                        return [ 'attributeId' => $attr_id, 'attributeValueId' => (int) $value_map[ $slug ] ];
+                    }
+                }
+                break;
+
             case 'gender':
             case 'age':
+            case 'age_group':
                 $wc_slug  = $global_settings[ $slot . '_wc' ]  ?? '';
                 $value_map = $global_settings[ $slot . '_map' ] ?? [];
 
@@ -420,6 +599,28 @@ class Woo_Trendyol_Attribute_Mapper {
      * @return string[]  Array of term slugs (may be empty).
      */
     private function get_product_term_slugs( WC_Product $product, string $wc_slug ): array {
+        if ( 'dim_length' === $wc_slug ) {
+            $val = (string) $product->get_length();
+            return '' !== $val ? [ $val, sanitize_title( $val ) ] : [];
+        }
+        if ( 'dim_width' === $wc_slug ) {
+            $val = (string) $product->get_width();
+            return '' !== $val ? [ $val, sanitize_title( $val ) ] : [];
+        }
+        if ( 'dim_height' === $wc_slug ) {
+            $val = (string) $product->get_height();
+            return '' !== $val ? [ $val, sanitize_title( $val ) ] : [];
+        }
+        if ( 'dim_weight' === $wc_slug ) {
+            $val = (string) $product->get_weight();
+            return '' !== $val ? [ $val, sanitize_title( $val ) ] : [];
+        }
+        if ( 0 === strpos( $wc_slug, 'meta:' ) ) {
+            $meta_key = substr( $wc_slug, 5 );
+            $val = (string) get_post_meta( $product->get_id(), $meta_key, true );
+            return '' !== $val ? [ $val, sanitize_title( $val ) ] : [];
+        }
+
         $attribute = $product->get_attribute( $wc_slug );
 
         // get_attribute() returns a comma-separated string for text attrs.
@@ -487,12 +688,21 @@ class Woo_Trendyol_Attribute_Mapper {
             // Gender: which WC attribute holds gender, and the value map.
             'gender_wc'      => get_option( 'trendyol_global_attr_gender_wc',  '' ),
             'gender_map'     => $decode_map( 'trendyol_global_attr_gender_map' ),
-            // Age group: which WC attribute holds age, and the value map.
+            // Age: which WC attribute holds age, and the value map.
             'age_wc'         => get_option( 'trendyol_global_attr_age_wc',     '' ),
             'age_map'        => $decode_map( 'trendyol_global_attr_age_map' ),
+            // Age group: which WC attribute holds age group, and the value map.
+            'age_group_wc'   => get_option( 'trendyol_global_attr_age_group_wc',     '' ),
+            'age_group_map'  => $decode_map( 'trendyol_global_attr_age_group_map' ),
+            // Color (Predefined): which WC attribute holds color, and the value map.
+            'color_wc'           => get_option( 'trendyol_global_attr_color_wc',   '' ),
+            'color_map'          => $decode_map( 'trendyol_global_attr_color_map' ),
+            // Color (Custom): which WC attribute holds custom color, and the value map.
+            'color_custom_wc'    => get_option( 'trendyol_global_attr_color_custom_wc',   '' ),
+            'color_custom_map'   => $decode_map( 'trendyol_global_attr_color_custom_map' ),
             // Brand and character: WC attribute slugs (unchanged).
-            'brand_wc'       => get_option( 'trendyol_global_attr_brand_wc',       '' ),
-            'character_wc'   => get_option( 'trendyol_global_attr_character_wc',   '' ),
+            'brand_wc'           => get_option( 'trendyol_global_attr_brand_wc',       '' ),
+            'character_wc'       => get_option( 'trendyol_global_attr_character_wc',   '' ),
         ];
     }
 
@@ -511,7 +721,27 @@ class Woo_Trendyol_Attribute_Mapper {
             return [];
         }
 
-        $mappings = get_term_meta( $term_id, '_trendyol_attribute_mappings', true );
+        $helper   = new Woo_Trendyol_Category_Helper();
+        $mappings = $helper->get_inherited_term_meta( $term_id, '_trendyol_attribute_mappings' );
+
+        return is_array( $mappings ) ? $mappings : [];
+    }
+
+    /**
+     * Load the per-category attribute value mapping from term meta.
+     *
+     * @since  1.0.0
+     * @access private
+     * @param  int $term_id WooCommerce product_cat term ID.
+     * @return array Map array, or empty array if not set.
+     */
+    private function load_category_attribute_value_map( int $term_id ): array {
+        if ( ! $term_id ) {
+            return [];
+        }
+
+        $helper   = new Woo_Trendyol_Category_Helper();
+        $mappings = $helper->get_inherited_term_meta( $term_id, '_trendyol_attribute_value_mappings' );
 
         return is_array( $mappings ) ? $mappings : [];
     }

@@ -86,7 +86,7 @@ class Woo_Trendyol_Category_Helper {
         // ---- Priority 2: Yoast SEO primary category ----
         $primary_id = $this->get_yoast_primary_category_id( $post_id );
         if ( $primary_id ) {
-            $id = get_term_meta( $primary_id, self::TERM_META_ID, true );
+            $id = $this->get_inherited_term_meta( $primary_id, self::TERM_META_ID );
             if ( ! empty( $id ) ) {
                 return (string) $id;
             }
@@ -119,7 +119,7 @@ class Woo_Trendyol_Category_Helper {
         // ---- Priority 2: Yoast SEO primary category ----
         $primary_id = $this->get_yoast_primary_category_id( $post_id );
         if ( $primary_id ) {
-            $path = get_term_meta( $primary_id, self::TERM_META_PATH, true );
+            $path = $this->get_inherited_term_meta( $primary_id, self::TERM_META_PATH );
             if ( ! empty( $path ) ) {
                 return $this->normalise_path( (string) $path );
             }
@@ -161,6 +161,52 @@ class Woo_Trendyol_Category_Helper {
     }
 
     // -----------------------------------------------------------------------
+    // Inheritance Helpers
+    // -----------------------------------------------------------------------
+
+    /**
+     * Recursively find the closest mapped term in a WooCommerce category's ancestry.
+     * A term is considered "mapped" if it has a `trendyol_category_id` term meta.
+     *
+     * @since  1.0.0
+     * @param  int $term_id The starting WooCommerce product_cat term ID.
+     * @return int The ID of the mapped term, or 0 if none is found.
+     */
+    public function get_mapped_term_id( int $term_id ): int {
+        while ( $term_id ) {
+            $trendyol_id = get_term_meta( $term_id, self::TERM_META_ID, true );
+            if ( ! empty( $trendyol_id ) ) {
+                return $term_id;
+            }
+
+            $term = get_term( $term_id, 'product_cat' );
+            if ( ! $term || is_wp_error( $term ) || empty( $term->parent ) ) {
+                break;
+            }
+
+            $term_id = (int) $term->parent;
+        }
+
+        return 0;
+    }
+
+    /**
+     * Retrieve term meta by climbing the category tree until a mapped category is found.
+     *
+     * @since  1.0.0
+     * @param  int    $term_id  The starting WooCommerce product_cat term ID.
+     * @param  string $meta_key The term meta key to retrieve.
+     * @return mixed  The term meta value from the closest mapped parent, or false/empty if none.
+     */
+    public function get_inherited_term_meta( int $term_id, string $meta_key ) {
+        $mapped_id = $this->get_mapped_term_id( $term_id );
+        if ( $mapped_id ) {
+            return get_term_meta( $mapped_id, $meta_key, true );
+        }
+        return get_term_meta( $term_id, $meta_key, true ); // Fallback to raw if unmapped
+    }
+
+    // -----------------------------------------------------------------------
     // Private resolution helpers
     // -----------------------------------------------------------------------
 
@@ -186,8 +232,8 @@ class Woo_Trendyol_Category_Helper {
         $best_depth = -1;
 
         foreach ( $terms as $term ) {
-            $trendyol_id   = get_term_meta( $term->term_id, self::TERM_META_ID,   true );
-            $trendyol_path = get_term_meta( $term->term_id, self::TERM_META_PATH, true );
+            $trendyol_id   = $this->get_inherited_term_meta( $term->term_id, self::TERM_META_ID );
+            $trendyol_path = $this->get_inherited_term_meta( $term->term_id, self::TERM_META_PATH );
 
             if ( empty( $trendyol_id ) ) {
                 continue;
@@ -225,8 +271,8 @@ class Woo_Trendyol_Category_Helper {
         $best_depth = -1;
 
         foreach ( $terms as $term ) {
-            $trendyol_id   = get_term_meta( $term->term_id, self::TERM_META_ID,   true );
-            $trendyol_path = get_term_meta( $term->term_id, self::TERM_META_PATH, true );
+            $trendyol_id   = $this->get_inherited_term_meta( $term->term_id, self::TERM_META_ID );
+            $trendyol_path = $this->get_inherited_term_meta( $term->term_id, self::TERM_META_PATH );
 
             if ( empty( $trendyol_id ) || empty( $trendyol_path ) ) {
                 continue;
@@ -262,9 +308,9 @@ class Woo_Trendyol_Category_Helper {
         }
 
         foreach ( $terms as $term ) {
-            $id = get_term_meta( $term->term_id, self::TERM_META_ID, true );
+            $id = $this->get_inherited_term_meta( $term->term_id, self::TERM_META_ID );
             if ( (string) $id === $category_id ) {
-                $path = get_term_meta( $term->term_id, self::TERM_META_PATH, true );
+                $path = $this->get_inherited_term_meta( $term->term_id, self::TERM_META_PATH );
                 return $this->normalise_path( (string) $path );
             }
         }
@@ -295,10 +341,202 @@ class Woo_Trendyol_Category_Helper {
      * @param  string $path Raw path string from term meta.
      * @return string  Human-readable path or empty string.
      */
+    /**
+     * Convert the '|||' separator used by the taxonomy mapper into ' > '.
+     *
+     * @since  1.0.0
+     * @access private
+     * @param  string $path Raw path string from term meta.
+     * @return string  Human-readable path or empty string.
+     */
     private function normalise_path( string $path ): string {
         if ( empty( $path ) ) {
             return '';
         }
         return implode( ' > ', array_map( 'trim', explode( '|||', $path ) ) );
     }
+
+    /**
+     * Resolve the WooCommerce category term representing the mapped category.
+     *
+     * @since  1.0.0
+     * @param  int $post_id WooCommerce product post ID.
+     * @return WP_Term|null Mapped category term or null.
+     */
+    public function get_resolved_category_term( int $post_id ): ?WP_Term {
+        // Yoast SEO primary category
+        $primary_id = $this->get_yoast_primary_category_id( $post_id );
+        if ( $primary_id ) {
+            $id = $this->get_inherited_term_meta( $primary_id, self::TERM_META_ID );
+            if ( ! empty( $id ) ) {
+                $term = get_term( $primary_id, 'product_cat' );
+                if ( $term instanceof WP_Term ) {
+                    return $term;
+                }
+            }
+        }
+
+        // Deepest mapped category
+        $terms = get_the_terms( $post_id, 'product_cat' );
+        if ( empty( $terms ) || is_wp_error( $terms ) ) {
+            return null;
+        }
+
+        $best_term  = null;
+        $best_depth = -1;
+
+        foreach ( $terms as $term ) {
+            $trendyol_id   = $this->get_inherited_term_meta( $term->term_id, self::TERM_META_ID );
+            $trendyol_path = $this->get_inherited_term_meta( $term->term_id, self::TERM_META_PATH );
+
+            if ( empty( $trendyol_id ) ) {
+                continue;
+            }
+
+            $depth = empty( $trendyol_path )
+                ? 0
+                : substr_count( (string) $trendyol_path, '|||' );
+
+            if ( $depth > $best_depth ) {
+                $best_depth = $depth;
+                $best_term  = $term;
+            }
+        }
+
+        return $best_term;
+    }
+
+    /**
+     * Calculate adjusted price based on global rules and category extra percentage.
+     *
+     * @since  1.0.0
+     * @param  WC_Product $product    The product.
+     * @param  float      $base_price Price to adjust.
+     * @return float Adjusted price.
+     */
+    public function get_adjusted_price( WC_Product $product, float $base_price ): float {
+        $adjusted_price = $base_price;
+
+        // 1. Global Fixed Amount Adjustment
+        $fixed_enabled = get_option( 'trendyol_price_rule_fixed_enabled', 'no' );
+        if ( 'yes' === $fixed_enabled ) {
+            $fixed_amount = (float) get_option( 'trendyol_price_rule_fixed_amount', 0 );
+            $adjusted_price += $fixed_amount;
+        }
+
+        // 2. Global Volumetric Weight Adjustment
+        $vw_enabled = get_option( 'trendyol_price_rule_vw_enabled', 'no' );
+        if ( 'yes' === $vw_enabled ) {
+            $height = (float) $product->get_height();
+            $width  = (float) $product->get_width();
+            $length = (float) $product->get_length();
+            $weight = (float) $product->get_weight();
+
+            $vw_calc = ( $height * $width * $length ) / 5000;
+            $volumetric_weight = max( $vw_calc, $weight );
+
+            if ( $volumetric_weight <= 0 ) {
+                $zero_dim_amount = (float) get_option( 'trendyol_price_rule_vw_zero_dimensions_amount', 0 );
+                $adjusted_price += $zero_dim_amount;
+            } else {
+                $amount_to_add = 0.0;
+                if ( $volumetric_weight < 1 ) {
+                    $amount_to_add = (float) get_option( 'trendyol_price_rule_vw_under_1', 0 );
+                } elseif ( $volumetric_weight >= 1 && $volumetric_weight <= 2 ) {
+                    $amount_to_add = (float) get_option( 'trendyol_price_rule_vw_1_to_2', 0 );
+                } elseif ( $volumetric_weight > 2 && $volumetric_weight <= 3 ) {
+                    $amount_to_add = (float) get_option( 'trendyol_price_rule_vw_2_to_3', 0 );
+                } elseif ( $volumetric_weight > 3 ) {
+                    $fixed = (float) get_option( 'trendyol_price_rule_vw_over_3_fixed', 0 );
+                    $coef  = (float) get_option( 'trendyol_price_rule_vw_over_3_coef', 0 );
+                    $amount_to_add = $fixed + ( $coef * ( $volumetric_weight - 3 ) );
+                }
+                $adjusted_price += $amount_to_add;
+            }
+        }
+
+        // 3. Global Percentage Adjustment
+        $pct_enabled = get_option( 'trendyol_price_rule_percentage_enabled', 'no' );
+        if ( 'yes' === $pct_enabled ) {
+            $percentage = (float) get_option( 'trendyol_price_rule_percentage', 0 );
+            $adjusted_price += $adjusted_price * ( $percentage / 100 );
+        }
+
+        // 4. Category-level Extra Percentage
+        $resolved_term = $this->get_resolved_category_term( $product->get_id() );
+        if ( ! $resolved_term && $product->get_parent_id() ) {
+            $resolved_term = $this->get_resolved_category_term( $product->get_parent_id() );
+        }
+
+        if ( $resolved_term ) {
+            $cat_extra_pct = (float) get_term_meta( $resolved_term->term_id, 'trendyol_category_extra_percentage', true );
+            if ( $cat_extra_pct > 0 ) {
+                $adjusted_price += $adjusted_price * ( $cat_extra_pct / 100 );
+            }
+        }
+
+        return $adjusted_price;
+    }
+
+    /**
+     * Calculate the final listPrice and salePrice to be sent to Trendyol
+     * based on WooCommerce prices, price rules, and override rules.
+     *
+     * @since  1.0.0
+     * @param  WC_Product $product The product or variation.
+     * @return array Array with keys 'listPrice' and 'salePrice'.
+     */
+    public function get_final_trendyol_prices( WC_Product $product ): array {
+        $regular_price = (float) $product->get_regular_price();
+        $sale_price    = (float) $product->get_sale_price();
+
+        // Check if there is an explicit product-level price override
+        $post_id = $product->get_id();
+        $price_override = get_post_meta( $post_id, '_trendyol_price_override', true );
+        if ( empty( $price_override ) && $product->get_parent_id() ) {
+            $price_override = get_post_meta( $product->get_parent_id(), '_trendyol_price_override', true );
+        }
+
+        if ( ! empty( $price_override ) && is_numeric( $price_override ) ) {
+            $override_val = round( (float) $price_override, 2 );
+            return [
+                'listPrice' => $override_val,
+                'salePrice' => $override_val,
+            ];
+        }
+
+        // Standard logic
+        if ( $sale_price > 0 && $sale_price < $regular_price ) {
+            // Product has a valid sale price
+            // Leave normal price as is, adjust sale price
+            $adj_sale_price = $this->get_adjusted_price( $product, $sale_price );
+            
+            if ( $adj_sale_price > $regular_price ) {
+                // If adjusted sale price > normal price, replace normal price (list price) with adjusted sale price
+                $final_list_price = $adj_sale_price;
+                $final_sale_price = $adj_sale_price;
+            } else {
+                // If adjusted sale price < normal price, send normal price as is and adjusted sale price
+                $final_list_price = $regular_price;
+                $final_sale_price = $adj_sale_price;
+            }
+        } else {
+            // Product has no sale price (or sale price is not active/valid)
+            // Adjust the regular price
+            $adj_regular_price = $this->get_adjusted_price( $product, $regular_price );
+            $final_list_price  = $adj_regular_price;
+            $final_sale_price  = $adj_regular_price;
+        }
+
+        // Just in case of any edge cases, ensure listPrice >= salePrice
+        if ( $final_list_price < $final_sale_price ) {
+            $final_list_price = $final_sale_price;
+        }
+
+        return [
+            'listPrice' => round( $final_list_price, 2 ),
+            'salePrice' => round( $final_sale_price, 2 ),
+        ];
+    }
 }
+

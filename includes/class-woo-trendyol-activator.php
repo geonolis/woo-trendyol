@@ -39,8 +39,9 @@ class Woo_Trendyol_Activator {
             'trendyol_seller_id'           => '',
             'trendyol_api_key'             => '',
             'trendyol_api_secret'          => '',
-            'trendyol_storefront_code'     => '',
-            'trendyol_order_poll_interval' => 15,
+            'trendyol_storefront_code'            => 'GR',
+            'trendyol_integration_reference_code' => '',
+            'trendyol_order_poll_interval'        => 15,
         ];
 
         foreach ( $defaults as $option => $value ) {

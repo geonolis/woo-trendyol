@@ -40,3 +40,15 @@ if ( ! defined( 'WPINC' ) ) {
     </div>
 
 </div>
+<div class="form-field term-trendyol-extra-percentage-wrap">
+    <label for="trendyol_category_extra_percentage"><?php esc_html_e( 'Trendyol Extra Percentage', 'woo-trendyol' ); ?></label>
+    <input type="number"
+           step="0.01"
+           name="trendyol_category_extra_percentage"
+           id="trendyol_category_extra_percentage"
+           value=""
+           style="width: 100px;" /> %
+    <p class="description">
+        <?php esc_html_e( 'Specify an extra percentage to be added to the price of products that belong to this category when sending to Trendyol.', 'woo-trendyol' ); ?>
+    </p>
+</div>

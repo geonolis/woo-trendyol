@@ -142,7 +142,15 @@ class Woo_Trendyol_Brand_Sync {
             wp_send_json_error( [ 'message' => $terms->get_error_message() ] );
         }
 
-        wp_send_json_success( [ 'term_ids' => array_map( 'intval', $terms ) ] );
+        $unmapped_term_ids = [];
+        foreach ( $terms as $term_id ) {
+            $mapped_id = get_term_meta( $term_id, self::META_KEY, true );
+            if ( empty( $mapped_id ) ) {
+                $unmapped_term_ids[] = (int) $term_id;
+            }
+        }
+
+        wp_send_json_success( [ 'term_ids' => $unmapped_term_ids ] );
     }
 
     /**
@@ -260,9 +268,9 @@ class Woo_Trendyol_Brand_Sync {
             wp_send_json_error( [ 'message' => __( 'Permission denied.', 'woo-trendyol' ) ] );
         }
 
-        $term_id       = isset( $_POST['term_id'] )       ? absint( $_POST['term_id'] )                                          : 0;
-        $trendyol_id   = isset( $_POST['trendyol_id'] )   ? absint( $_POST['trendyol_id'] )                                      : 0;
-        $trendyol_name = isset( $_POST['trendyol_name'] ) ? sanitize_text_field( wp_unslash( $_POST['trendyol_name'] ) )          : '';
+        $term_id       = isset( $_POST['term_id'] ) ? absint( $_POST['term_id'] ) : 0;
+        $trendyol_id   = isset( $_POST['ty_id'] )   ? absint( $_POST['ty_id'] )   : 0;
+        $trendyol_name = isset( $_POST['ty_name'] ) ? sanitize_text_field( wp_unslash( $_POST['ty_name'] ) ) : '';
 
         if ( ! $term_id ) {
             wp_send_json_error( [ 'message' => __( 'Invalid term ID.', 'woo-trendyol' ) ] );

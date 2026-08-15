@@ -23,6 +23,7 @@ $options = [
     'trendyol_api_key',
     'trendyol_api_secret',
     'trendyol_storefront_code',
+    'trendyol_integration_reference_code',
     'trendyol_order_poll_interval',
     'trendyol_last_order_poll',
 ];

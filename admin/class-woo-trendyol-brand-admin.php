@@ -235,12 +235,13 @@ class Woo_Trendyol_Brand_Admin {
      * @since 1.0.0
      * @return string HTML string.
      */
-    public function render_brand_sync_card(): string {
+    public function render_brand_sync_card(): void {
         if ( ! taxonomy_exists( 'product_brand' ) ) {
-            return sprintf(
+            echo sprintf(
                 '<div class="wt-card wt-card--notice"><p>%s</p></div>',
                 esc_html__( 'WooCommerce Brands is not active. Enable it to use brand sync.', 'woo-trendyol' )
             );
+            return;
         }
 
         $total_brands = wp_count_terms( [ 'taxonomy' => 'product_brand', 'hide_empty' => false ] );
@@ -263,10 +264,10 @@ class Woo_Trendyol_Brand_Admin {
             </p>
 
             <div class="wt-brand-sync-controls">
-                <button type="button" id="wt-btn-sync-brands" class="button button-secondary">
+                <button type="button" id="wt-brand-sync" class="button button-secondary">
                     <?php esc_html_e( 'Sync Brands', 'woo-trendyol' ); ?>
                 </button>
-                <button type="button" id="wt-btn-pause-brands" class="button" style="display:none;">
+                <button type="button" id="wt-brand-sync-pause" class="button" style="display:none;">
                     <?php esc_html_e( 'Pause', 'woo-trendyol' ); ?>
                 </button>
                 <span class="spinner" id="wt-brand-spinner" style="float:none;"></span>
@@ -276,28 +277,14 @@ class Woo_Trendyol_Brand_Admin {
                 <div class="wt-progress-bar-track">
                     <div class="wt-progress-bar-fill" id="wt-brand-progress-fill" style="width:0%"></div>
                 </div>
-                <p class="wt-progress-label" id="wt-brand-progress-label">0 / 0</p>
+                <p class="wt-progress-label" id="wt-brand-progress-text">0 / 0</p>
             </div>
 
-            <div id="wt-brand-sync-results" style="display:none; margin-top:10px; max-height:220px; overflow-y:auto;">
-                <table class="wt-brand-results-table widefat striped">
-                    <thead>
-                        <tr>
-                            <th><?php esc_html_e( 'Brand', 'woo-trendyol' ); ?></th>
-                            <th><?php esc_html_e( 'Trendyol Match', 'woo-trendyol' ); ?></th>
-                            <th><?php esc_html_e( 'Status', 'woo-trendyol' ); ?></th>
-                        </tr>
-                    </thead>
-                    <tbody id="wt-brand-results-body"></tbody>
-                </table>
+            <div id="wt-brand-results" class="wt-results" style="display:none; margin-top:10px;">
+                <div id="wt-brand-results-list" class="wt-results-list"></div>
             </div>
 
-            <div id="wt-brand-sync-totals" style="display:none; margin-top:8px;">
-                <strong><?php esc_html_e( 'Results:', 'woo-trendyol' ); ?></strong>
-                <span id="wt-brand-total-matched">0</span> <?php esc_html_e( 'matched', 'woo-trendyol' ); ?>,
-                <span id="wt-brand-total-not-found">0</span> <?php esc_html_e( 'not found', 'woo-trendyol' ); ?>,
-                <span id="wt-brand-total-errors">0</span> <?php esc_html_e( 'errors', 'woo-trendyol' ); ?>
-            </div>
+            <div id="wt-brand-totals" style="display:none; margin-top:8px;"></div>
 
             <?php if ( $total_brands > 0 ) : ?>
             <p style="margin-top:8px;">
@@ -308,7 +295,7 @@ class Woo_Trendyol_Brand_Admin {
             <?php endif; ?>
         </div>
         <?php
-        return ob_get_clean();
+        echo ob_get_clean();
     }
 
     /**

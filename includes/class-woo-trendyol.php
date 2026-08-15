@@ -114,6 +114,15 @@ class Woo_Trendyol {
      */
     protected Woo_Trendyol_Brand_Sync $brand_sync;
 
+    /**
+     * Import Export instance.
+     *
+     * @since  1.0.0
+     * @access protected
+     * @var    Woo_Trendyol_Import_Export $import_export
+     */
+    protected Woo_Trendyol_Import_Export $import_export;
+
     // -----------------------------------------------------------------------
     // Constructor
     // -----------------------------------------------------------------------
@@ -165,6 +174,7 @@ class Woo_Trendyol {
         require_once $path . 'includes/class-woo-trendyol-product-sync.php';
         require_once $path . 'includes/class-woo-trendyol-order-sync.php';
         require_once $path . 'includes/class-woo-trendyol-brand-sync.php';
+        require_once $path . 'includes/class-woo-trendyol-import-export.php';
 
         // Admin classes.
         require_once $path . 'admin/class-woo-trendyol-admin.php';
@@ -196,6 +206,9 @@ class Woo_Trendyol {
             $this->api,
             $this->logger
         );
+
+        // Import/Export service.
+        $this->import_export = new Woo_Trendyol_Import_Export();
     }
 
     // -----------------------------------------------------------------------
@@ -259,6 +272,7 @@ class Woo_Trendyol {
 
         // Product meta box.
         $this->loader->add_action( 'add_meta_boxes',    $admin, 'register_product_meta_box' );
+        $this->loader->add_action( 'add_meta_boxes',    $admin, 'register_order_meta_box' );
         $this->loader->add_action( 'save_post_product', $admin, 'save_product_meta_box', 10, 1 );
 
         // AJAX handlers — settings page.
@@ -268,20 +282,25 @@ class Woo_Trendyol {
         // AJAX handlers — bulk push.
         $this->loader->add_action( 'wp_ajax_trendyol_get_pushable_products', $admin, 'ajax_get_pushable_products' );
         $this->loader->add_action( 'wp_ajax_trendyol_bulk_push_batch',       $admin, 'ajax_bulk_push_batch' );
+        $this->loader->add_action( 'wp_ajax_trendyol_bulk_sync_price_stock_batch', $admin, 'ajax_bulk_sync_price_stock_batch' );
         $this->loader->add_action( 'wp_ajax_trendyol_poll_batch_status',     $admin, 'ajax_poll_batch_status' );
 
         // AJAX handlers — product edit page.
         $this->loader->add_action( 'wp_ajax_trendyol_refresh_status',       $admin, 'ajax_refresh_product_status' );
         $this->loader->add_action( 'wp_ajax_trendyol_push_single_product',  $admin, 'ajax_push_single_product' );
+        $this->loader->add_action( 'wp_ajax_trendyol_get_shipping_label',   $admin, 'ajax_get_shipping_label' );
 
         // AJAX handlers — global attribute mapping UI.
         $this->loader->add_action( 'wp_ajax_trendyol_load_attr_values', $admin, 'ajax_load_attr_values' );
+        $this->loader->add_action( 'wp_ajax_trendyol_load_all_mapped_attr_values', $admin, 'ajax_load_all_mapped_attr_values' );
         $this->loader->add_action( 'wp_ajax_trendyol_get_wc_terms',     $admin, 'ajax_get_wc_terms' );
 
         // AJAX handlers — Sync actions (Brands are handled in brand admin).
         $this->loader->add_action( 'wp_ajax_trendyol_sync_categories',          $admin, 'ajax_sync_categories' );
         $this->loader->add_action( 'wp_ajax_trendyol_sync_category_attributes', $admin, 'ajax_sync_category_attributes' );
         $this->loader->add_action( 'wp_ajax_trendyol_sync_attribute_values',    $admin, 'ajax_sync_attribute_values' );
+        $this->loader->add_action( 'wp_ajax_trendyol_sync_single_category_attributes', $admin, 'ajax_sync_single_category_attributes' );
+        $this->loader->add_action( 'wp_ajax_trendyol_get_wc_attribute_terms', $admin, 'ajax_get_wc_attribute_terms' );
 
         // Taxonomy mapper (cascading dropdowns on product_cat).
         $taxonomy = new Woo_Trendyol_Taxonomy(
@@ -294,6 +313,11 @@ class Woo_Trendyol {
         $this->loader->add_action( 'created_product_cat',          $taxonomy, 'save_category_fields', 10, 2 );
         $this->loader->add_action( 'edited_product_cat',           $taxonomy, 'save_category_fields', 10, 2 );
         $this->loader->add_action( 'admin_enqueue_scripts',        $taxonomy, 'enqueue_scripts' );
+        $this->loader->add_filter( 'manage_edit-product_cat_columns', $taxonomy, 'add_category_columns' );
+        $this->loader->add_filter( 'manage_product_cat_custom_column', $taxonomy, 'render_category_column_content', 10, 3 );
+        $this->loader->add_filter( 'bulk_actions-edit-product_cat', $taxonomy, 'register_bulk_action' );
+        $this->loader->add_action( 'wp_ajax_trendyol_bulk_map_categories', $taxonomy, 'ajax_bulk_map_categories' );
+        $this->loader->add_action( 'admin_footer-edit-tags.php', $taxonomy, 'render_bulk_modal' );
 
         // Brand admin (taxonomy column, edit-brand UI, brand sync card).
         $brand_admin = new Woo_Trendyol_Brand_Admin(
@@ -362,6 +386,8 @@ class Woo_Trendyol {
         $this->loader->add_action( 'updated_post_meta',                     $product_sync, 'on_post_meta_updated',  10, 4 );
         $this->loader->add_action( 'added_post_meta',                       $product_sync, 'on_post_meta_updated',  10, 4 );
         $this->loader->add_action( 'edit_attachment',                       $product_sync, 'on_attachment_updated', 10, 1 );
+        $this->loader->add_action( 'woocommerce_product_set_stock',         $product_sync, 'on_product_stock_set',  10, 1 );
+        $this->loader->add_action( 'woocommerce_variation_set_stock',       $product_sync, 'on_product_stock_set',  10, 1 );
 
         // Order sync (polling + status notifications).
         $order_sync = new Woo_Trendyol_Order_Sync(

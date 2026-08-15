@@ -260,6 +260,9 @@ class Woo_Trendyol_Order_Sync {
             }
         }
 
+        // Poll status updates for active orders to follow carrier status directly
+        $this->update_active_orders_status();
+
         // Persist the poll timestamp so the next run starts from here.
         update_option( 'trendyol_last_order_poll', $now );
 
@@ -322,6 +325,9 @@ class Woo_Trendyol_Order_Sync {
                 $package_id
             )
         );
+
+        $order->add_order_note( __( 'Trendyol status updated to Picking. The shipping voucher is now being prepared by Trendyol.', 'woo-trendyol' ) );
+        $order->save();
     }
 
     /**
@@ -421,7 +427,7 @@ class Woo_Trendyol_Order_Sync {
         try {
             // wc_create_order() writes to the active order data store.
             $order = wc_create_order( [
-                'status'      => 'processing',
+                'status'      => 'on-hold',
                 'customer_id' => 0, // Guest order.
             ] );
 
@@ -456,6 +462,10 @@ class Woo_Trendyol_Order_Sync {
             $order->update_meta_data( '_trendyol_gross_amount',            $package['grossAmount']         ?? '' );
             $order->update_meta_data( '_trendyol_total_discount',          $package['totalDiscount']       ?? '' );
             $order->update_meta_data( '_trendyol_delivery_type',           $package['deliveryType']        ?? '' );
+
+            // Set payment method origin
+            $order->set_payment_method( 'trendyol' );
+            $order->set_payment_method_title( 'Trendyol' );
 
             // Add a human-readable order note.
             $order->add_order_note(
@@ -542,7 +552,7 @@ class Woo_Trendyol_Order_Sync {
      * Add product line items to a WC order from Trendyol package lines.
      *
      * Attempts to match each Trendyol line item to a WooCommerce product by
-     * barcode (SKU). Adds a fee line item if no matching product is found.
+     * merchantSku (WooCommerce SKU). Adds a fee line item if no matching product is found.
      *
      * @since  1.0.0
      * @access private
@@ -553,13 +563,17 @@ class Woo_Trendyol_Order_Sync {
         $lines = $package['lines'] ?? [];
 
         foreach ( $lines as $line ) {
-            $barcode  = (string) ( $line['barcode']     ?? '' );
-            $quantity = (int)    ( $line['quantity']    ?? 1  );
-            $price    = (float)  ( $line['amount']      ?? 0  );
-            $name     = (string) ( $line['productName'] ?? $barcode );
+            $merchant_sku = (string) ( $line['merchantSku'] ?? '' );
+            $barcode      = (string) ( $line['barcode']     ?? '' );
+            $quantity     = (int)    ( $line['quantity']    ?? 1  );
+            $price        = (float)  ( $line['amount']      ?? 0  );
+            $name         = (string) ( $line['productName'] ?? ( $merchant_sku ?: $barcode ) );
 
-            // Attempt to match by SKU (barcode).
-            $product_id = wc_get_product_id_by_sku( $barcode );
+            // Attempt to match by SKU (merchantSku).
+            $product_id = 0;
+            if ( ! empty( $merchant_sku ) ) {
+                $product_id = wc_get_product_id_by_sku( $merchant_sku );
+            }
 
             if ( $product_id ) {
                 $product = wc_get_product( $product_id );
@@ -572,8 +586,11 @@ class Woo_Trendyol_Order_Sync {
                     $item->set_subtotal( $price * $quantity );
                     $item->set_total( $price * $quantity );
 
-                    // Store the Trendyol barcode on the line item for reference.
-                    $item->add_meta_data( '_trendyol_barcode', $barcode );
+                    // Store the Trendyol reference details on the line item for reference.
+                    $item->add_meta_data( '_trendyol_merchant_sku', $merchant_sku );
+                    if ( ! empty( $barcode ) ) {
+                        $item->add_meta_data( '_trendyol_barcode', $barcode );
+                    }
 
                     $order->add_item( $item );
                     continue;
@@ -582,7 +599,13 @@ class Woo_Trendyol_Order_Sync {
 
             // No matching WC product — add as a fee line so the order total is correct.
             $fee = new WC_Order_Item_Fee();
-            $fee->set_name( sanitize_text_field( $name ) . ' (' . esc_html( $barcode ) . ')' );
+            $fee_name = sanitize_text_field( $name );
+            if ( ! empty( $merchant_sku ) ) {
+                $fee_name .= ' (' . esc_html( $merchant_sku ) . ')';
+            } elseif ( ! empty( $barcode ) ) {
+                $fee_name .= ' (' . esc_html( $barcode ) . ')';
+            }
+            $fee->set_name( $fee_name );
             $fee->set_amount( $price * $quantity );
             $fee->set_total( $price * $quantity );
 
@@ -650,6 +673,73 @@ class Woo_Trendyol_Order_Sync {
         ] );
 
         return ! empty( $orders );
+    }
+
+    /**
+     * Poll Trendyol for status changes on active orders and update WooCommerce status.
+     *
+     * Queries WooCommerce orders in 'on-hold' or 'processing' status that have a Trendyol package ID,
+     * checks their current status on Trendyol, and updates WooCommerce if they are Shipped, Delivered, or Cancelled.
+     *
+     * @since 1.0.0
+     */
+    public function update_active_orders_status(): void {
+        if ( ! $this->api->is_active() ) {
+            return;
+        }
+
+        // Query active orders (on-hold or processing) with a Trendyol package ID.
+        $orders = wc_get_orders( [
+            'status'     => [ 'on-hold', 'processing' ],
+            'meta_key'   => self::META_PACKAGE_ID,
+            'meta_compare'=> 'EXISTS',
+            'limit'      => 50, // Process in batches of 50 to avoid timeouts.
+        ] );
+
+        if ( empty( $orders ) ) {
+            return;
+        }
+
+        foreach ( $orders as $order ) {
+            $package_id = $order->get_meta( self::META_PACKAGE_ID, true );
+            if ( empty( $package_id ) ) {
+                continue;
+            }
+
+            $response = $this->api->get_shipment_package( (string) $package_id );
+            if ( is_wp_error( $response ) ) {
+                $this->logger->error( sprintf( 'Failed to fetch status for package %s: %s', $package_id, $response->get_error_message() ) );
+                continue;
+            }
+
+            $packages = $response['content'] ?? [];
+            if ( empty( $packages ) ) {
+                continue;
+            }
+
+            $package = $packages[0];
+            $ty_status = (string) ( $package['status'] ?? '' );
+
+            if ( empty( $ty_status ) ) {
+                continue;
+            }
+
+            $current_wc_status = $order->get_status();
+
+            // Map Trendyol statuses to WooCommerce order statuses / notes
+            if ( in_array( $ty_status, [ 'Shipped', 'Delivered' ], true ) ) {
+                $notified_status = $order->get_meta( '_trendyol_carrier_notified_status', true );
+                if ( $notified_status !== $ty_status ) {
+                    $order->add_order_note( sprintf( __( 'Trendyol carrier status updated to %s.', 'woo-trendyol' ), $ty_status ) );
+                    $order->update_meta_data( '_trendyol_carrier_notified_status', $ty_status );
+                    $order->save();
+                    $this->logger->info( sprintf( 'Order %d (package %s) carrier status updated: %s', $order->get_id(), $package_id, $ty_status ) );
+                }
+            } elseif ( 'Cancelled' === $ty_status && 'cancelled' !== $current_wc_status ) {
+                $order->update_status( 'cancelled', __( 'Trendyol package status updated to Cancelled.', 'woo-trendyol' ) );
+                $this->logger->info( sprintf( 'Order %d (package %s) transitioned to cancelled based on Trendyol status: Cancelled', $order->get_id(), $package_id ) );
+            }
+        }
     }
 
     // -----------------------------------------------------------------------

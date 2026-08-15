@@ -49,7 +49,7 @@
     // Initialise on DOM ready
     // -----------------------------------------------------------------------
 
-    $( function () {
+        $( function () {
         // Bail if the localised data is not present (not on a taxonomy page).
         if ( typeof wooTrendyolTaxonomy === 'undefined' ) {
             return;
@@ -58,231 +58,311 @@
         cascade     = wooTrendyolTaxonomy.cascade  || {};
         flatMap     = wooTrendyolTaxonomy.flatMap   || {};
         SEP         = wooTrendyolTaxonomy.sep       || '|||';
-        $container  = $( '#trendyol-dropdowns-container' );
-        $idInput    = $( '#trendyol_category_id' );
-        $pathInput  = $( '#trendyol_category_path' );
-        $pathDisplay = $( '#trendyol-selected-path' );
 
-        if ( ! $container.length ) {
-            return;
-        }
+        $( '.wt-taxonomy-mapping-box' ).each( function () {
+            var $wrapper = $( this );
 
-        init();
-    } );
+            var $container   = $wrapper.find( '[id="trendyol-dropdowns-container"]' );
+            var $idInput     = $wrapper.find( '[id="trendyol_category_id"]' );
+            var $pathInput   = $wrapper.find( '[id="trendyol_category_path"]' );
+            var $pathDisplay = $wrapper.find( '[id="trendyol-selected-path"]' );
+            var $directIdBtn = $wrapper.find( '[id="wt-direct-category-btn"]' );
+            var $directIdInput = $wrapper.find( '[id="wt-direct-category-id"]' );
 
-    // -----------------------------------------------------------------------
-    // Initialisation
-    // -----------------------------------------------------------------------
+            if ( ! $container.length ) {
+                return;
+            }
 
-    /**
-     * Initialise the dropdown cascade.
-     *
-     * Reads the existing category ID from the hidden input (set by PHP for
-     * the Edit screen) and pre-selects all levels if a mapping exists.
-     */
-    function init() {
-        $container.empty();
+            init();
 
-        var currentId       = $idInput.val();
-        var preselectedPath = [];
+            $directIdBtn.on( 'click', function ( e ) {
+                e.preventDefault();
+                var inputId = $directIdInput.val().trim();
+                if ( ! inputId ) {
+                    return;
+                }
 
-        // If an existing mapping is stored, look up the full path array.
-        if ( currentId && flatMap[ currentId ] ) {
-            preselectedPath = flatMap[ currentId ];
-        }
-
-        // Build the root level.
-        buildDropdown( 0, '__root__', preselectedPath );
-    }
-
-    // -----------------------------------------------------------------------
-    // Dropdown builder
-    // -----------------------------------------------------------------------
-
-    /**
-     * Build and append a <select> dropdown for a given cascade level.
-     *
-     * @param {number} levelIndex     Zero-based depth level.
-     * @param {string} parentKey      Key into the cascade object for this level's children.
-     * @param {Array}  preselectedPath Array of category names representing the pre-selected path.
-     */
-    function buildDropdown( levelIndex, parentKey, preselectedPath ) {
-        // Stop if there are no children for this key (leaf node reached).
-        if ( ! cascade[ parentKey ] || cascade[ parentKey ].length === 0 ) {
-            return;
-        }
-
-        var children        = cascade[ parentKey ];
-        var selectId        = 'trendyol-level-' + levelIndex;
-        var preselectedValue = preselectedPath.length > levelIndex
-            ? preselectedPath[ levelIndex ]
-            : null;
-
-        // Build the <select> element.
-        var $select = $( '<select>', {
-            id:               selectId,
-            'class':          'trendyol-category-level',
-            'data-level':     levelIndex,
-            'data-parent-key': parentKey,
-        } );
-
-        // Default / placeholder option.
-        $select.append( $( '<option>', {
-            value: '',
-            text:  sprintf( wooTrendyolTaxonomy.labels.selectLevel, levelIndex + 1 ),
-        } ) );
-
-        // Populate options from the cascade data.
-        $.each( children, function ( index, item ) {
-            var $option = $( '<option>', {
-                value:      item.name,
-                text:       item.name,
-                'data-id':  item.id || '',
+                if ( flatMap && flatMap[ inputId ] ) {
+                    var pathArray = flatMap[ inputId ];
+                    updateHiddenFields( inputId, pathArray );
+                    init(); // Rebuild the dropdowns based on the new ID
+                    
+                    // Automatically resync attributes when leaf category is selected.
+                    $( '#wt-resync-attrs-btn' ).trigger( 'click' );
+                } else {
+                    alert( wooTrendyolTaxonomy.labels && wooTrendyolTaxonomy.labels.idNotFound ? wooTrendyolTaxonomy.labels.idNotFound : 'Category ID not found in the Trendyol mapping.' );
+                }
             } );
 
-            if ( item.name === preselectedValue ) {
-                $option.prop( 'selected', true );
+            // Attributes sync is only for the single-edit screen, 
+            // but we bind it on the global element '#wt-resync-attrs-btn' once outside the loop?
+            // Actually, the button is global so binding it multiple times would be bad.
+            // But wait, the button is only on the single-edit screen.
+            // Let's keep the internal functions here.
+
+            function init() {
+                $container.empty();
+                var currentId       = $idInput.val();
+                var preselectedPath = [];
+                if ( currentId && flatMap[ currentId ] ) {
+                    preselectedPath = flatMap[ currentId ];
+                }
+                buildDropdown( 0, '__root__', preselectedPath );
             }
 
-            $select.append( $option );
+            function buildDropdown( levelIndex, parentKey, preselectedPath ) {
+                if ( ! cascade[ parentKey ] || cascade[ parentKey ].length === 0 ) {
+                    return;
+                }
+                var children        = cascade[ parentKey ];
+                var selectId        = 'trendyol-level-' + levelIndex + '-' + Math.floor(Math.random() * 1000);
+                var preselectedValue = preselectedPath.length > levelIndex ? preselectedPath[ levelIndex ] : null;
+                var $select = $( '<select>', {
+                    id:               selectId,
+                    'class':          'trendyol-category-level',
+                    'data-level':     levelIndex,
+                    'data-parent-key': parentKey,
+                } );
+                $select.append( $( '<option>', {
+                    value: '',
+                    text:  sprintf( wooTrendyolTaxonomy.labels.selectLevel, levelIndex + 1 ),
+                } ) );
+                $.each( children, function ( index, item ) {
+                    var $option = $( '<option>', {
+                        value:      item.name,
+                        text:       item.name,
+                        'data-id':  item.id || '',
+                    } );
+                    if ( item.name === preselectedValue ) {
+                        $option.prop( 'selected', true );
+                    }
+                    $select.append( $option );
+                } );
+                $container.append( $select );
+                $select.on( 'change', handleDropdownChange );
+                if ( preselectedValue ) {
+                    var nextKey = buildNextKey( parentKey, preselectedValue );
+                    buildDropdown( levelIndex + 1, nextKey, preselectedPath );
+                }
+            }
+
+            function handleDropdownChange( e ) {
+                var $select       = $( e.target );
+                var levelIndex    = parseInt( $select.data( 'level' ), 10 );
+                var selectedValue = $select.val();
+                var $selectedOpt  = $select.find( 'option:selected' );
+                var leafId        = $selectedOpt.data( 'id' );
+
+                $container.find( 'select' ).filter( function () {
+                    return parseInt( $( this ).data( 'level' ), 10 ) > levelIndex;
+                } ).remove();
+
+                if ( ! selectedValue ) {
+                    updateHiddenFields( '', [] );
+                    return;
+                }
+
+                var currentPath = collectCurrentPath();
+                var nextKey = currentPath.join( SEP );
+
+                if ( leafId ) {
+                    updateHiddenFields( String( leafId ), currentPath );
+                    $( '#wt-resync-attrs-btn' ).trigger( 'click' );
+                } else {
+                    updateHiddenFields( '', currentPath );
+                    buildDropdown( levelIndex + 1, nextKey, [] );
+                }
+            }
+
+            function updateHiddenFields( id, pathArray ) {
+                $idInput.val( id );
+                $pathInput.val( pathArray.join( SEP ) );
+                var $btn = $( '#wt-resync-attrs-btn' );
+                if ( pathArray.length > 0 ) {
+                    var displayStr = pathArray.join( ' > ' );
+                    if ( id ) {
+                        displayStr += ' (ID: ' + id + ')';
+                        $btn.show();
+                    } else {
+                        displayStr += ' (' + wooTrendyolTaxonomy.labels.incomplete + ')';
+                        $btn.hide();
+                    }
+                    $pathDisplay.text( displayStr );
+                } else {
+                    $pathDisplay.text( '' );
+                    $btn.hide();
+                }
+            }
+
+            function collectCurrentPath() {
+                var path = [];
+                $container.find( 'select' ).each( function () {
+                    var val = $( this ).val();
+                    if ( val ) {
+                        path.push( val );
+                    }
+                } );
+                return path;
+            }
+
+            function buildNextKey( parentKey, selectedValue ) {
+                if ( '__root__' === parentKey ) {
+                    return selectedValue;
+                }
+                return parentKey + SEP + selectedValue;
+            }
         } );
 
-        // Append to the container and bind the change handler.
-        $container.append( $select );
-        $select.on( 'change', handleDropdownChange );
-
-        // If a value was pre-selected, recursively build the next level.
-        if ( preselectedValue ) {
-            var nextKey = buildNextKey( parentKey, preselectedValue );
-            buildDropdown( levelIndex + 1, nextKey, preselectedPath );
-        }
-    }
-
-    // -----------------------------------------------------------------------
-    // Change handler
-    // -----------------------------------------------------------------------
-
-    /**
-     * Handle a change event on any level dropdown.
-     *
-     * Removes all deeper dropdowns, then either builds the next level
-     * (for non-leaf selections) or updates the hidden fields (for leaf selections).
-     *
-     * @param {Event} e The jQuery change event.
-     */
-    function handleDropdownChange( e ) {
-        var $select       = $( e.target );
-        var levelIndex    = parseInt( $select.data( 'level' ), 10 );
-        var selectedValue = $select.val();
-        var $selectedOpt  = $select.find( 'option:selected' );
-        var leafId        = $selectedOpt.data( 'id' );
-
-        // Remove all dropdowns deeper than the current level.
-        $container.find( 'select' ).filter( function () {
-            return parseInt( $( this ).data( 'level' ), 10 ) > levelIndex;
-        } ).remove();
-
-        // User cleared the selection.
-        if ( ! selectedValue ) {
-            updateHiddenFields( '', [] );
-            return;
-        }
-
-        // Build the current path array from all visible dropdowns.
-        var currentPath = collectCurrentPath();
-
-        // Build the next cascade key.
-        var nextKey = currentPath.join( SEP );
-
-        if ( leafId ) {
-            // Leaf node reached — update hidden fields with the resolved ID.
-            updateHiddenFields( String( leafId ), currentPath );
-        } else {
-            // Intermediate node — update path display (incomplete) and build next level.
-            updateHiddenFields( '', currentPath );
-            buildDropdown( levelIndex + 1, nextKey, [] );
-        }
-    }
-
-    // -----------------------------------------------------------------------
-    // Hidden field updater
-    // -----------------------------------------------------------------------
-
-    /**
-     * Update the hidden input fields and the visible path display.
-     *
-     * @param {string} id        Trendyol category ID (empty if not yet at a leaf).
-     * @param {Array}  pathArray Array of selected category names.
-     */
-    function updateHiddenFields( id, pathArray ) {
-        $idInput.val( id );
-        $pathInput.val( pathArray.join( SEP ) );
-
-        if ( pathArray.length > 0 ) {
-            var displayStr = pathArray.join( ' > ' );
-
-            if ( id ) {
-                displayStr += ' (ID: ' + id + ')';
-            } else {
-                displayStr += ' (' + wooTrendyolTaxonomy.labels.incomplete + ')';
+        // Global attributes binding (should only be done once per page)
+        $( '#wt-resync-attrs-btn' ).on( 'click', function ( e ) {
+            e.preventDefault();
+            // In the taxonomy edit screen, the main idInput is the only one we care about for attributes
+            var $mainIdInput = $( '.wt-taxonomy-mapping-box' ).not('#wt-bulk-modal .wt-taxonomy-mapping-box').find( '[id="trendyol_category_id"]' );
+            if ( ! $mainIdInput.length ) $mainIdInput = $( '#trendyol_category_id' );
+            
+            var categoryId = $mainIdInput.val();
+            if ( ! categoryId ) {
+                return;
             }
 
-            $pathDisplay.text( displayStr );
-        } else {
-            $pathDisplay.text( '' );
-        }
-    }
+            var $btn = $( this );
+            var $spinner = $( '#wt-resync-attrs-spinner' );
 
-    // -----------------------------------------------------------------------
-    // Private helpers
-    // -----------------------------------------------------------------------
+            $btn.prop( 'disabled', true );
+            $spinner.addClass( 'is-active' );
 
-    /**
-     * Collect the currently selected values from all visible dropdowns.
-     *
-     * @returns {Array} Array of selected category name strings.
-     */
-    function collectCurrentPath() {
-        var path = [];
-
-        $container.find( 'select' ).each( function () {
-            var val = $( this ).val();
-            if ( val ) {
-                path.push( val );
+            var termId = 0;
+            var urlParams = new URLSearchParams( window.location.search );
+            if ( urlParams.has( 'tag_ID' ) ) {
+                termId = parseInt( urlParams.get( 'tag_ID' ), 10 );
             }
+
+            $.ajax( {
+                url:      wooTrendyolTaxonomy.ajaxUrl,
+                type:     'POST',
+                dataType: 'json',
+                data: {
+                    action:      'trendyol_sync_single_category_attributes',
+                    category_id: categoryId,
+                    term_id:     termId,
+                    nonce:       wooTrendyolTaxonomy.nonce,
+                },
+                success: function ( response ) {
+                    $btn.prop( 'disabled', false );
+                    $spinner.removeClass( 'is-active' );
+
+                    if ( response.success ) {
+                        $( '#wt-attributes-wrapper' ).html( response.data.html );
+                    } else {
+                        alert( response.data.message || 'Error occurred.' );
+                    }
+                },
+                error: function () {
+                    $btn.prop( 'disabled', false );
+                    $spinner.removeClass( 'is-active' );
+                    alert( 'An error occurred while syncing attributes.' );
+                }
+            } );
         } );
 
-        return path;
-    }
+        $( '#wt-attributes-wrapper' ).on( 'change', 'select[id^="trendyol_attr_"]', function ( e ) {
+            var $select = $( this );
+            var attrId = $select.attr( 'id' ).replace( 'trendyol_attr_', '' );
+            var wcAttr = $select.val();
 
-    /**
-     * Build the cascade lookup key for the next dropdown level.
-     *
-     * The root level uses the selected value directly; deeper levels
-     * concatenate the parent key with the selected value using SEP.
-     *
-     * @param  {string} parentKey     The parent's cascade key.
-     * @param  {string} selectedValue The value selected in the current dropdown.
-     * @returns {string} The next cascade key.
-     */
-    function buildNextKey( parentKey, selectedValue ) {
-        if ( '__root__' === parentKey ) {
-            return selectedValue;
+            var $td = $select.parent();
+            $td.find( '.wt-value-mappings' ).remove();
+
+            if ( ! wcAttr ) {
+                return;
+            }
+
+            var $box = $( '#wt-attributes-wrapper' ).find( '.wt-taxonomy-attributes-box' );
+            var reqAttrsData = $box.data( 'required-attributes' ) || [];
+            var valueMappings = $box.data( 'value-mappings' ) || {};
+
+            var attrData = null;
+            $.each( reqAttrsData, function( i, item ) {
+                if ( String( item.id ) === String( attrId ) ) {
+                    attrData = item;
+                    return false;
+                }
+            } );
+
+            if ( ! attrData || ! attrData.values || attrData.values.length === 0 ) {
+                return;
+            }
+
+            $.ajax( {
+                url:      wooTrendyolTaxonomy.ajaxUrl,
+                type:     'POST',
+                dataType: 'json',
+                data: {
+                    action:  'trendyol_get_wc_attribute_terms',
+                    wc_attr: wcAttr,
+                    nonce:   wooTrendyolTaxonomy.nonce,
+                },
+                success: function ( response ) {
+                    if ( response.success && response.data.terms && response.data.terms.length > 0 ) {
+                        var terms = response.data.terms;
+                        var savedMap = valueMappings[ attrId ] || {};
+
+                        $td.find( '.wt-value-mappings, .wt-custom-values-notice' ).remove();
+
+                        if ( attrData.values && attrData.values.length > 0 ) {
+                            var html = '<div class="wt-value-mappings" style="margin-top: 10px; padding: 10px; background: #f9f9f9; border: 1px solid #ddd; max-height: 250px; overflow-y: auto;">';
+                            html += '<strong>Map Values:</strong>';
+                            html += '<table style="width: 100%; border-collapse: collapse; margin-top: 5px;">';
+
+                            $.each( terms, function( j, term ) {
+                                var savedVal = savedMap[ term.slug ] || '';
+
+                                if ( ! savedVal ) {
+                                    var termNameLower = term.name.toLowerCase().trim();
+                                    $.each( attrData.values, function( k, tyVal ) {
+                                        var tyValNameLower = tyVal.name.toLowerCase().trim();
+                                        if ( termNameLower === tyValNameLower ) {
+                                            savedVal = tyVal.id;
+                                            return false;
+                                        }
+                                    } );
+                                }
+
+                                html += '<tr style="border-bottom: 1px solid #eee;">';
+                                html += '<td style="padding: 5px 0; font-size: 12px;">' + term.name + '</td>';
+                                html += '<td style="padding: 5px 0; text-align: right;">';
+                                html += '<select name="trendyol_attribute_value_mappings[' + attrId + '][' + term.slug + ']" style="font-size: 12px; min-width: 250px; max-width: 100%;">';
+                                html += '<option value="">-- Select Trendyol Value --</option>';
+
+                                $.each( attrData.values, function( k, tyVal ) {
+                                    var selectedAttr = String( tyVal.id ) === String( savedVal ) ? ' selected="selected"' : '';
+                                    html += '<option value="' + tyVal.id + '"' + selectedAttr + '>' + tyVal.name + '</option>';
+                                } );
+
+                                html += '</select>';
+                                html += '</td>';
+                                html += '</tr>';
+                            } );
+
+                            html += '</table>';
+                            html += '</div>';
+
+                            $td.append( html );
+                        } else if ( attrData.allowCustom ) {
+                            var html = '<div class="wt-custom-values-notice" style="margin-top: 10px; padding: 8px 12px; background: #f0f6fb; border-left: 4px solid #11a0d2; font-size: 11px; color: #50575e;">';
+                            html += 'This attribute allows custom values. Individual value mapping is not required; your WooCommerce term names will be sent directly.';
+                            html += '</div>';
+                            $td.append( html );
+                        }
+                    }
+                }
+            } );
+        } );
+
+        function sprintf( template, value ) {
+            return template.replace( '%d', value );
         }
-        return parentKey + SEP + selectedValue;
-    }
 
-    /**
-     * Minimal sprintf implementation for single %d substitution.
-     *
-     * Used to format the "Select Category Level N" placeholder text.
-     *
-     * @param  {string} template String containing a single %d placeholder.
-     * @param  {number} value    The integer to substitute.
-     * @returns {string} Formatted string.
-     */
-    function sprintf( template, value ) {
-        return template.replace( '%d', value );
-    }
+    } );
 
 } )( jQuery );

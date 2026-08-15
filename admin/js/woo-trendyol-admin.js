@@ -44,16 +44,6 @@
         batches: []
     };
 
-    var brandSync = {
-        running: false,
-        paused:  false,
-        chunks:  [],
-        index:   0,
-        total:   0,
-        matched: 0,
-        unmatched: 0
-    };
-
     // =========================================================================
     // DOM ready
     // =========================================================================
@@ -65,10 +55,12 @@
         initHandlingTimeToggle();
         initBarcodeSourceToggle();
         initCargoCompanyFetch();
+        initPriceRulesToggle();
         initBulkPush();
+        initSyncPriceStock();
+        initSyncPriceStock();
         initManualBatchPoll();
-        initBrandSync();
-        initBrandSearch();
+
         initAttrMapping();
         initSendToTrendyol();
         initSyncTasks();
@@ -139,6 +131,33 @@
 
         $radios.on( 'change', function () { showSubField( $( this ).val() ); } );
         showSubField( $radios.filter( ':checked' ).val() );
+    }
+
+    // =========================================================================
+    // Price Rules visibility toggle
+    // =========================================================================
+
+    function initPriceRulesToggle() {
+        var $fixedToggle = $( '#trendyol_price_rule_fixed_enabled' );
+        var $pctToggle   = $( '#trendyol_price_rule_percentage_enabled' );
+        var $vwToggle    = $( '#trendyol_price_rule_vw_enabled' );
+
+        if ( ! $fixedToggle.length && ! $pctToggle.length && ! $vwToggle.length ) { return; }
+
+        function toggleRows() {
+            var isFixed = $fixedToggle.is( ':checked' );
+            var isPct   = $pctToggle.is( ':checked' );
+            var isVw    = $vwToggle.is( ':checked' );
+
+            $( '#trendyol_price_rule_fixed_amount' ).closest( 'tr' ).toggle( isFixed );
+            $( '#trendyol_price_rule_percentage' ).closest( 'tr' ).toggle( isPct );
+
+            var $vwRows = $( '#trendyol_price_rule_vw_under_1, #trendyol_price_rule_vw_1_to_2, #trendyol_price_rule_vw_2_to_3, #trendyol_price_rule_vw_over_3_fixed, #trendyol_price_rule_vw_over_3_coef, #trendyol_price_rule_vw_zero_dimensions_amount' ).closest( 'tr' );
+            $vwRows.toggle( isVw );
+        }
+
+        $( '#trendyol_price_rule_fixed_enabled, #trendyol_price_rule_percentage_enabled, #trendyol_price_rule_vw_enabled' ).on( 'change', toggleRows );
+        toggleRows();
     }
 
     // =========================================================================
@@ -225,9 +244,11 @@
     function initBulkPush() {
         var $btn          = $( '#wt-bulk-push' );
         var $pauseBtn     = $( '#wt-bulk-pause' );
+        var $cancelBtn    = $( '#wt-bulk-cancel' );
         var $progressWrap = $( '#wt-bulk-progress-wrap' );
         var $progressFill = $( '#wt-bulk-progress-fill' );
         var $progressText = $( '#wt-bulk-progress-text' );
+        var $currentIds   = $( '#wt-bulk-current-ids' );
         var $results      = $( '#wt-bulk-results' );
         var $resultsList  = $( '#wt-bulk-results-list' );
         var $totals       = $( '#wt-bulk-totals' );
@@ -244,12 +265,14 @@
                 bulkPush.running = true;
                 $btn.prop( 'disabled', true ).text( wooTrendyolAdmin.bulkPushingText );
                 $pauseBtn.prop( 'disabled', false ).text( 'Pause' );
+                $cancelBtn.show();
                 pushNextChunk();
                 return;
             }
 
             // Fresh start
             var onlyUnmapped = $( '#wt-bulk-only-unmapped' ).is( ':checked' );
+            var includeOutOfStock = $( '#wt-bulk-include-out-of-stock' ).is( ':checked' );
 
             bulkPush.running  = true;
             bulkPush.paused   = false;
@@ -263,9 +286,11 @@
 
             $btn.prop( 'disabled', true ).text( wooTrendyolAdmin.bulkPushingText );
             $pauseBtn.prop( 'disabled', false ).show().text( 'Pause' );
+            $cancelBtn.show();
             $progressWrap.show();
             $progressFill.css( 'width', '0%' );
             $progressText.text( '0 / ?' );
+            $currentIds.text( '' );
             $totals.hide().empty();
             $results.hide();
             $resultsList.empty();
@@ -273,12 +298,18 @@
             $.post( wooTrendyolAdmin.ajaxUrl, {
                 action:        'trendyol_get_pushable_products',
                 nonce:         wooTrendyolAdmin.nonce,
-                only_unmapped: onlyUnmapped ? 1 : 0
+                only_unmapped: onlyUnmapped ? 1 : 0,
+                include_out_of_stock: includeOutOfStock ? 1 : 0,
+                action_type:   'push'
             } )
             .done( function ( response ) {
                 if ( ! response.success || ! response.data.product_ids ) {
                     finishBulkWithError( 'Could not retrieve product list.' );
                     return;
+                }
+
+                if ( response.data.message ) {
+                    appendBulkRow( 'Info', 'info', response.data.message );
                 }
 
                 var allIds = response.data.product_ids;
@@ -316,6 +347,15 @@
             $btn.prop( 'disabled', false ).text( 'Resume' );
         } );
 
+        // ---- Cancel button ----
+        $cancelBtn.on( 'click', function () {
+            if ( ! bulkPush.running ) { return; }
+            bulkPush.running = false;
+            bulkPush.paused = false;
+            appendBulkRow( 'Cancelled', 'error', 'Operation cancelled by user.' );
+            finishBulkPush();
+        } );
+
         // ---- Push next chunk ----
         function pushNextChunk() {
             if ( bulkPush.paused || ! bulkPush.running ) { return; }
@@ -326,6 +366,7 @@
             }
 
             var chunk = bulkPush.chunks[ bulkPush.index++ ];
+            $currentIds.text( 'Processing IDs: ' + chunk.join(', ') );
 
             $.post( wooTrendyolAdmin.ajaxUrl, {
                 action:      'trendyol_bulk_push_batch',
@@ -366,6 +407,9 @@
 
         function appendBulkRow( id, status, message ) {
             var cls = status === 'error' ? 'wt-result--error' : 'wt-result--success';
+            if (status === 'info') {
+                cls = 'wt-result--info';
+            }
             $resultsList.append(
                 '<div class="wt-result-row ' + cls + '">' +
                 '<strong>#' + escHtml( String( id ) ) + '</strong> — ' + escHtml( message ) +
@@ -380,8 +424,9 @@
 
             $btn.prop( 'disabled', false ).text( wooTrendyolAdmin.bulkPushText );
             $pauseBtn.prop( 'disabled', true ).hide();
+            $cancelBtn.hide();
             $progressFill.css( 'width', '100%' );
-            $progressText.text( bulkPush.total + ' / ' + bulkPush.total );
+            $currentIds.text( 'Done.' );
 
             // Totals summary.
             $totals.html(
@@ -420,8 +465,230 @@
             bulkPush.paused  = false;
             $btn.prop( 'disabled', false ).text( wooTrendyolAdmin.bulkPushText );
             $pauseBtn.prop( 'disabled', true ).hide();
+            $cancelBtn.hide();
             $progressWrap.hide();
             appendBulkRow( 'Error', 'error', msg );
+            $results.show();
+        }
+    }
+
+    // =========================================================================
+    // Sync Price & Stock (async, pauseable)
+    // =========================================================================
+
+    function initSyncPriceStock() {
+        var $btn          = $( '#wt-sync-price-stock' );
+        var $pauseBtn     = $( '#wt-sync-pause' );
+        var $cancelBtn    = $( '#wt-sync-cancel' );
+        var $progressWrap = $( '#wt-sync-progress-wrap' );
+        var $progressFill = $( '#wt-sync-progress-fill' );
+        var $progressText = $( '#wt-sync-progress-text' );
+        var $currentIds   = $( '#wt-sync-current-ids' );
+        var $results      = $( '#wt-sync-results' );
+        var $resultsList  = $( '#wt-sync-results-list' );
+
+        var syncOp = {
+            running: false,
+            paused: false,
+            chunks: [],
+            index: 0,
+            total: 0,
+            synced: 0,
+            skipped: 0,
+            batches: []
+        };
+
+        if ( ! $btn.length ) { return; }
+
+        $btn.on( 'click', function () {
+            if ( syncOp.running && ! syncOp.paused ) { return; }
+
+            if ( syncOp.paused ) {
+                syncOp.paused  = false;
+                syncOp.running = true;
+                $btn.prop( 'disabled', true ).text( 'Syncing...' );
+                $pauseBtn.prop( 'disabled', false ).text( 'Pause' );
+                $cancelBtn.show();
+                pushNextChunk();
+                return;
+            }
+
+            var includeOutOfStock = $( '#wt-sync-include-out-of-stock' ).is( ':checked' );
+
+            syncOp.running  = true;
+            syncOp.paused   = false;
+            syncOp.chunks   = [];
+            syncOp.index    = 0;
+            syncOp.total    = 0;
+            syncOp.synced   = 0;
+            syncOp.skipped  = 0;
+            syncOp.batches  = [];
+
+            $btn.prop( 'disabled', true ).text( 'Syncing...' );
+            $pauseBtn.prop( 'disabled', false ).show().text( 'Pause' );
+            $cancelBtn.show();
+            $progressWrap.show();
+            $progressFill.css( 'width', '0%' );
+            $progressText.text( '0 / ?' );
+            $currentIds.text( '' );
+            $results.hide();
+            $resultsList.empty();
+
+            $.post( wooTrendyolAdmin.ajaxUrl, {
+                action:        'trendyol_get_pushable_products',
+                nonce:         wooTrendyolAdmin.nonce,
+                only_unmapped: 0,
+                include_out_of_stock: includeOutOfStock ? 1 : 0,
+                action_type:   'sync'
+            } )
+            .done( function ( response ) {
+                if ( ! response.success || ! response.data.product_ids ) {
+                    finishWithError( 'Could not retrieve product list.' );
+                    return;
+                }
+
+                if ( response.data.message ) {
+                    appendRow( 'Info', 'info', response.data.message );
+                }
+
+                var allIds = response.data.product_ids;
+                syncOp.total = allIds.length;
+
+                if ( syncOp.total === 0 ) {
+                    finishWithError( 'No eligible products found.' );
+                    return;
+                }
+
+                $progressText.text( '0 / ' + syncOp.total );
+
+                for ( var i = 0; i < allIds.length; i += BATCH_SIZE ) {
+                    syncOp.chunks.push( allIds.slice( i, i + BATCH_SIZE ) );
+                }
+
+                pushNextChunk();
+            } )
+            .fail( function () {
+                finishWithError( 'Failed to retrieve product list.' );
+            } );
+        } );
+
+        $pauseBtn.on( 'click', function () {
+            if ( ! syncOp.running ) { return; }
+            if ( syncOp.paused ) { return; }
+            syncOp.paused = true;
+            $( this ).prop( 'disabled', true ).text( 'Paused' );
+            $btn.prop( 'disabled', false ).text( 'Resume' );
+        } );
+
+        $cancelBtn.on( 'click', function () {
+            if ( ! syncOp.running ) { return; }
+            syncOp.running = false;
+            syncOp.paused = false;
+            appendRow( 'Cancelled', 'error', 'Operation cancelled by user.' );
+            finishOp();
+        } );
+
+        function pushNextChunk() {
+            if ( syncOp.paused || ! syncOp.running ) { return; }
+
+            if ( syncOp.index >= syncOp.chunks.length ) {
+                finishOp();
+                return;
+            }
+
+            var chunk = syncOp.chunks[ syncOp.index++ ];
+            $currentIds.text( 'Processing IDs: ' + chunk.join(', ') );
+
+            $.post( wooTrendyolAdmin.ajaxUrl, {
+                action:      'trendyol_bulk_sync_price_stock_batch',
+                nonce:       wooTrendyolAdmin.nonce,
+                product_ids: JSON.stringify( chunk )
+            } )
+            .done( function ( res ) {
+                if ( res.success ) {
+                    syncOp.synced  += res.data.submitted || 0;
+                    syncOp.skipped += res.data.skipped   || 0;
+                    if ( res.data.batches ) {
+                        syncOp.batches = syncOp.batches.concat( res.data.batches );
+                    }
+                    if ( res.data.errors ) {
+                        $.each( res.data.errors, function ( pid, msg ) {
+                            appendRow( pid, 'error', msg );
+                        } );
+                    }
+                } else {
+                    syncOp.skipped += chunk.length;
+                    appendRow( 'Batch', 'error', res.data.message || 'Unknown error' );
+                }
+
+                var done = syncOp.synced + syncOp.skipped;
+                var pct  = syncOp.total > 0 ? Math.round( ( done / syncOp.total ) * 100 ) : 0;
+                $progressFill.css( 'width', pct + '%' );
+                $progressText.text( done + ' / ' + syncOp.total );
+
+                pushNextChunk();
+            } )
+            .fail( function () {
+                syncOp.skipped += chunk.length;
+                appendRow( 'Batch', 'error', 'HTTP request failed.' );
+                pushNextChunk();
+            } );
+        }
+
+        function appendRow( id, status, message ) {
+            var cls = status === 'error' ? 'wt-result--error' : 'wt-result--success';
+            if (status === 'info') {
+                cls = 'wt-result--info';
+            }
+            $resultsList.append(
+                '<div class="wt-result-row ' + cls + '">' +
+                '<strong>#' + escHtml( String( id ) ) + '</strong> — ' + escHtml( message ) +
+                '</div>'
+            );
+            $results.show();
+        }
+
+        function finishOp() {
+            syncOp.running = false;
+            syncOp.paused  = false;
+
+            $btn.prop( 'disabled', false ).text( 'Sync Price & Stock' );
+            $pauseBtn.prop( 'disabled', true ).hide();
+            $cancelBtn.hide();
+            $progressFill.css( 'width', '100%' );
+            $currentIds.text( 'Done.' );
+
+            var summary = '<div class="wt-result-row wt-result--success">' +
+                '<strong>Done.</strong> ' +
+                syncOp.synced + ' submitted, ' + syncOp.skipped + ' skipped.' +
+                '</div>';
+
+            if ( syncOp.batches.length ) {
+                summary += '<div class="wt-result-row wt-result--info">' +
+                    'Batch IDs: ' + escHtml( syncOp.batches.join( ', ' ) ) +
+                    ' &mdash; <a href="#" class="wt-poll-batches" data-batches="' +
+                    escHtml( syncOp.batches.join( ',' ) ) + '">Poll Status</a>' +
+                    '</div>';
+            }
+
+            $resultsList.prepend( summary );
+            $results.show();
+
+            if ( syncOp.batches.length ) {
+                setTimeout( function () {
+                    pollBatchStatuses( syncOp.batches, $resultsList, $results );
+                }, 30000 );
+            }
+        }
+
+        function finishWithError( msg ) {
+            syncOp.running = false;
+            syncOp.paused  = false;
+            $btn.prop( 'disabled', false ).text( 'Sync Price & Stock' );
+            $pauseBtn.prop( 'disabled', true ).hide();
+            $cancelBtn.hide();
+            $progressWrap.hide();
+            appendRow( 'Error', 'error', msg );
             $results.show();
         }
     }
@@ -481,300 +748,7 @@
         } );
     }
 
-    // =========================================================================
-    // Brand sync (async, pauseable, with matched/unmatched totals)
-    // =========================================================================
 
-    function initBrandSync() {
-        var $btn          = $( '#wt-brand-sync' );
-        var $pauseBtn     = $( '#wt-brand-sync-pause' );
-        var $progressWrap = $( '#wt-brand-progress-wrap' );
-        var $progressFill = $( '#wt-brand-progress-fill' );
-        var $progressText = $( '#wt-brand-progress-text' );
-        var $results      = $( '#wt-brand-results' );
-        var $resultsList  = $( '#wt-brand-results-list' );
-        var $totals       = $( '#wt-brand-totals' );
-
-        if ( ! $btn.length ) { return; }
-
-        // ---- Start / Resume ----
-        $btn.on( 'click', function () {
-            if ( brandSync.running && ! brandSync.paused ) { return; }
-
-            if ( brandSync.paused ) {
-                brandSync.paused  = false;
-                brandSync.running = true;
-                $btn.prop( 'disabled', true ).text( 'Syncing…' );
-                $pauseBtn.prop( 'disabled', false ).text( 'Pause' );
-                syncNextBrandChunk();
-                return;
-            }
-
-            // Fresh start — fetch all brand term IDs first.
-            brandSync.running   = true;
-            brandSync.paused    = false;
-            brandSync.chunks    = [];
-            brandSync.index     = 0;
-            brandSync.total     = 0;
-            brandSync.matched   = 0;
-            brandSync.unmatched = 0;
-
-            $btn.prop( 'disabled', true ).text( 'Syncing…' );
-            $pauseBtn.prop( 'disabled', false ).show().text( 'Pause' );
-            $progressWrap.show();
-            $progressFill.css( 'width', '0%' );
-            $progressText.text( '0 / ?' );
-            $totals.hide().empty();
-            $results.hide();
-            $resultsList.empty();
-
-            $.post( wooTrendyolAdmin.ajaxUrl, {
-                action: 'trendyol_sync_brands',
-                nonce:  wooTrendyolAdmin.nonce,
-                step:   'get_brands'
-            } )
-            .done( function ( response ) {
-                if ( ! response.success || ! response.data.term_ids ) {
-                    finishBrandWithError( 'Could not retrieve brand list.' );
-                    return;
-                }
-
-                var allIds = response.data.term_ids;
-                brandSync.total = allIds.length;
-
-                if ( brandSync.total === 0 ) {
-                    finishBrandWithError( 'No brands found. Make sure WooCommerce Brands is active.' );
-                    return;
-                }
-
-                $progressText.text( '0 / ' + brandSync.total );
-
-                for ( var i = 0; i < allIds.length; i += 20 ) {
-                    brandSync.chunks.push( allIds.slice( i, i + 20 ) );
-                }
-
-                syncNextBrandChunk();
-            } )
-            .fail( function () {
-                finishBrandWithError( 'Failed to retrieve brand list.' );
-            } );
-        } );
-
-        // ---- Pause ----
-        $pauseBtn.on( 'click', function () {
-            if ( ! brandSync.running || brandSync.paused ) { return; }
-            brandSync.paused = true;
-            $( this ).prop( 'disabled', true ).text( 'Paused' );
-            $btn.prop( 'disabled', false ).text( 'Resume' );
-        } );
-
-        // ---- Sync next chunk ----
-        function syncNextBrandChunk() {
-            if ( brandSync.paused || ! brandSync.running ) { return; }
-
-            if ( brandSync.index >= brandSync.chunks.length ) {
-                finishBrandSync();
-                return;
-            }
-
-            var chunk = brandSync.chunks[ brandSync.index++ ];
-
-            $.post( wooTrendyolAdmin.ajaxUrl, {
-                action:   'trendyol_sync_brands',
-                nonce:    wooTrendyolAdmin.nonce,
-                step:     'sync_batch',
-                term_ids: JSON.stringify( chunk )
-            } )
-            .done( function ( res ) {
-                if ( res.success && res.data.results ) {
-                    $.each( res.data.results, function ( i, item ) {
-                        if ( item.matched ) {
-                            brandSync.matched++;
-                            appendBrandRow( item.name, 'success',
-                                'Matched: <strong>' + escHtml( item.trendyol_name ) + '</strong> (ID: ' + escHtml( String( item.trendyol_id ) ) + ')' );
-                        } else {
-                            brandSync.unmatched++;
-                            appendBrandRow( item.name, 'error', 'No match found' );
-                        }
-                    } );
-                } else {
-                    brandSync.unmatched += chunk.length;
-                    appendBrandRow( 'Batch', 'error', ( res.data && res.data.message ) || 'Unknown error' );
-                }
-
-                var done = brandSync.matched + brandSync.unmatched;
-                var pct  = brandSync.total > 0 ? Math.round( ( done / brandSync.total ) * 100 ) : 0;
-                $progressFill.css( 'width', pct + '%' );
-                $progressText.text( done + ' / ' + brandSync.total );
-
-                syncNextBrandChunk();
-            } )
-            .fail( function () {
-                brandSync.unmatched += chunk.length;
-                appendBrandRow( 'Batch', 'error', 'HTTP request failed.' );
-                syncNextBrandChunk();
-            } );
-        }
-
-        function appendBrandRow( name, status, message ) {
-            var cls = status === 'error' ? 'wt-result--error' : 'wt-result--success';
-            $resultsList.append(
-                '<div class="wt-result-row ' + cls + '">' +
-                '<strong>' + escHtml( name ) + '</strong> — ' + message +
-                '</div>'
-            );
-            $results.show();
-        }
-
-        function finishBrandSync() {
-            brandSync.running = false;
-            brandSync.paused  = false;
-
-            $btn.prop( 'disabled', false ).text( 'Sync Brands' );
-            $pauseBtn.prop( 'disabled', true ).hide();
-            $progressFill.css( 'width', '100%' );
-            $progressText.text( brandSync.total + ' / ' + brandSync.total );
-
-            $totals.html(
-                '<div class="wt-totals-row">' +
-                '<span class="wt-total-item wt-total--approved">&#x2714; Matched: <strong>' + brandSync.matched + '</strong></span>' +
-                '<span class="wt-total-item wt-total--skipped">&#x2716; Unmatched: <strong>' + brandSync.unmatched + '</strong></span>' +
-                '</div>'
-            ).show();
-
-            $resultsList.prepend(
-                '<div class="wt-result-row wt-result--success">' +
-                '<strong>Brand sync complete.</strong> ' +
-                brandSync.matched + ' matched, ' + brandSync.unmatched + ' unmatched.' +
-                '</div>'
-            );
-            $results.show();
-        }
-
-        function finishBrandWithError( msg ) {
-            brandSync.running = false;
-            brandSync.paused  = false;
-            $btn.prop( 'disabled', false ).text( 'Sync Brands' );
-            $pauseBtn.prop( 'disabled', true ).hide();
-            $progressWrap.hide();
-            appendBrandRow( 'Error', 'error', msg );
-            $results.show();
-        }
-    }
-
-    // =========================================================================
-    // Brand search & remap (edit-brand page and brand list column)
-    // =========================================================================
-
-    function initBrandSearch() {
-        // Search button on edit-brand page.
-        $( document ).on( 'click', '#wt-brand-search-btn', function () {
-            var query = $( '#wt-brand-search-input' ).val().trim();
-            if ( ! query ) { return; }
-            runBrandSearch( query );
-        } );
-
-        // Allow Enter key in the search input.
-        $( document ).on( 'keypress', '#wt-brand-search-input', function ( e ) {
-            if ( 13 === e.which ) {
-                e.preventDefault();
-                var query = $( this ).val().trim();
-                if ( query ) { runBrandSearch( query ); }
-            }
-        } );
-
-        // Select a result from the search list.
-        $( document ).on( 'click', '.wt-brand-result-select', function ( e ) {
-            e.preventDefault();
-            var $row   = $( this ).closest( '.wt-brand-result-row' );
-            var tyId   = $row.data( 'ty-id' );
-            var tyName = $row.data( 'ty-name' );
-            var termId = $( '#wt-brand-term-id' ).val();
-
-            saveBrandMapping( termId, tyId, tyName );
-        } );
-
-        // Clear mapping button.
-        $( document ).on( 'click', '#wt-brand-clear-mapping', function ( e ) {
-            e.preventDefault();
-            var termId = $( '#wt-brand-term-id' ).val();
-            saveBrandMapping( termId, '', '' );
-        } );
-    }
-
-    function runBrandSearch( query ) {
-        var $list    = $( '#wt-brand-search-results' );
-        var $spinner = $( '#wt-brand-search-spinner' );
-
-        $list.empty().hide();
-        $spinner.addClass( 'is-active' );
-
-        $.post( wooTrendyolAdmin.ajaxUrl, {
-            action: 'trendyol_search_brand',
-            nonce:  wooTrendyolAdmin.nonce,
-            query:  query
-        } )
-        .done( function ( response ) {
-            if ( response.success && response.data.brands && response.data.brands.length ) {
-                var html = '';
-                $.each( response.data.brands, function ( i, brand ) {
-                    html += '<div class="wt-brand-result-row" data-ty-id="' + escHtml( String( brand.id ) ) + '" data-ty-name="' + escHtml( brand.name ) + '">' +
-                            '<span class="wt-brand-result-name">' + escHtml( brand.name ) + '</span>' +
-                            ' <small class="wt-brand-result-id">#' + escHtml( String( brand.id ) ) + '</small>' +
-                            ' <a href="#" class="wt-brand-result-select button button-small">Use</a>' +
-                            '</div>';
-                } );
-                $list.html( html ).show();
-            } else {
-                $list.html( '<p class="description">No matching brands found.</p>' ).show();
-            }
-        } )
-        .fail( function () {
-            $list.html( '<p class="description wt-error">Search request failed.</p>' ).show();
-        } )
-        .always( function () {
-            $spinner.removeClass( 'is-active' );
-        } );
-    }
-
-    function saveBrandMapping( termId, tyId, tyName ) {
-        var $status = $( '#wt-brand-mapping-status' );
-        $status.text( 'Saving…' ).show();
-
-        $.post( wooTrendyolAdmin.ajaxUrl, {
-            action:    'trendyol_save_brand_mapping',
-            nonce:     wooTrendyolAdmin.nonce,
-            term_id:   termId,
-            ty_id:     tyId,
-            ty_name:   tyName
-        } )
-        .done( function ( response ) {
-            if ( response.success ) {
-                $status.text( tyId ? 'Saved: ' + tyName + ' (#' + tyId + ')' : 'Mapping cleared.' );
-                // Update the current mapping display.
-                if ( tyId ) {
-                    $( '#wt-brand-current-id' ).text( tyId );
-                    $( '#wt-brand-current-name' ).text( tyName );
-                    $( '#wt-brand-status-badge' )
-                        .removeClass( 'wt-badge--unmapped' )
-                        .addClass( 'wt-badge--mapped' )
-                        .text( 'Mapped' );
-                } else {
-                    $( '#wt-brand-current-id' ).text( '—' );
-                    $( '#wt-brand-current-name' ).text( '—' );
-                    $( '#wt-brand-status-badge' )
-                        .removeClass( 'wt-badge--mapped' )
-                        .addClass( 'wt-badge--unmapped' )
-                        .text( 'Not mapped' );
-                }
-            } else {
-                $status.text( 'Error: ' + ( response.data.message || 'Save failed.' ) );
-            }
-        } )
-        .fail( function () {
-            $status.text( 'Request failed.' );
-        } );
-    }
 
     // =========================================================================
     // Product status refresh (product edit page)
@@ -875,58 +849,211 @@
     // =========================================================================
 
     var attrState = {
-        gender: { tyValues: [], wcTerms: [] },
-        age:    { tyValues: [], wcTerms: [] }
+        gender:       { tyValues: [], wcTerms: [] },
+        age:          { tyValues: [], wcTerms: [] },
+        age_group:    { tyValues: [], wcTerms: [] },
+        color:        { tyValues: [], wcTerms: [] },
+        color_custom: { tyValues: [], wcTerms: [] }
     };
 
     function initAttrMapping() {
-        if ( ! $( '#wt-load-attr-values' ).length ) { return; }
+        if ( ! $( '#wt-load-all-mapped-attr-values' ).length && ! $( '.wt-attr-mapping-form-table' ).length ) { return; }
 
-        $( '#wt-load-attr-values' ).on( 'click', function () {
-            var categoryId = $( '#wt-attr-sample-category' ).val();
-            if ( ! categoryId ) {
-                alert( 'Please enter a Trendyol category ID.' );
-                return;
-            }
-            loadAttrValues( parseInt( categoryId, 10 ) );
+        initAttrAccordions();
+
+        $( '#wt-load-all-mapped-attr-values' ).on( 'click', function () {
+            loadAttrValues();
         } );
 
-        $( document ).on( 'change', '.wt-wc-attr-selector', function () {
-            var slot   = $( this ).data( 'slot' );
-            var wcAttr = $( this ).val();
-            fetchWcTerms( slot, wcAttr );
+        $( document ).on( 'change', '.wt-wc-attr-selector, .wt-brand-source-select, select[name="trendyol_global_attr_character_wc"]', function () {
+            var $select = $( this );
+            var val     = $select.val();
+
+            if ( val === 'custom_meta_prompt' ) {
+                var metaKey = prompt( 'Enter product custom post meta key (e.g. _my_custom_meta_key):' );
+                if ( metaKey ) {
+                    metaKey = metaKey.trim();
+                    if ( metaKey ) {
+                        var fullVal = 'meta:' + metaKey;
+                        if ( ! $select.find( 'option[value="' + fullVal + '"]' ).length ) {
+                            var $optGroup = $select.find( 'optgroup[label*="Custom Meta"], optgroup:last' );
+                            if ( $optGroup.length ) {
+                                $optGroup.prepend( '<option value="' + escHtml( fullVal ) + '" selected="selected">' + escHtml( 'Custom Meta: ' + metaKey ) + '</option>' );
+                            } else {
+                                $select.append( '<option value="' + escHtml( fullVal ) + '" selected="selected">' + escHtml( 'Custom Meta: ' + metaKey ) + '</option>' );
+                            }
+                        }
+                        $select.val( fullVal ).trigger( 'change' );
+                        return;
+                    }
+                }
+                $select.val( '' );
+                return;
+            }
+
+            var slot   = $select.data( 'slot' );
+            if ( slot ) {
+                fetchWcTerms( slot, val );
+            }
         } );
 
         $( 'form' ).on( 'submit', function () {
-            serializeMappingTable( 'gender' );
-            serializeMappingTable( 'age' );
+            $.each( attrState, function ( id, data ) {
+                serializeMappingTable( id );
+            } );
         } );
     }
 
-    function loadAttrValues( categoryId ) {
-        var $btn     = $( '#wt-load-attr-values' );
+    function initAttrAccordions() {
+        var $table = $( '.wt-attr-mapping-form-table' );
+        if ( ! $table.length ) return;
+
+        $table.children( 'tbody' ).children( 'tr' ).each( function () {
+            var $tr = $( this );
+            var $th = $tr.children( 'th' );
+            var $td = $tr.children( 'td' );
+
+            if ( ! $th.length || $th.hasClass( 'wt-accordion-init' ) ) return;
+            $th.addClass( 'wt-accordion-init' );
+
+            // Extract label text cleanly
+            var rawTitle = $th.find( 'label' ).text() || $th.text();
+            var titleText = rawTitle.replace( /\s*—\s*WooCommerce Attribute/i, '' ).replace( /\s*—\s*WC Attribute/i, '' ).trim();
+
+            // Find select dropdown in td
+            var $select = $td.find( 'select' ).first();
+
+            $th.html(
+                '<div class="wt-accordion-header-left">' +
+                    '<span class="dashicons dashicons-chevron-right wt-accordion-toggle-icon"></span>' +
+                    '<strong class="wt-accordion-title">' + escHtml( titleText ) + '</strong>' +
+                '</div>' +
+                '<div class="wt-accordion-header-center"></div>' +
+                '<div class="wt-accordion-header-right">' +
+                    '<button type="button" class="button button-secondary button-small wt-accordion-toggle-btn">' +
+                        '<span class="dashicons dashicons-arrow-down-alt2" style="vertical-align: middle; margin-right: 3px;"></span>Expand for details' +
+                    '</button>' +
+                '</div>'
+            );
+
+            // Move select element into visible header center column
+            if ( $select.length ) {
+                $th.find( '.wt-accordion-header-center' ).append( $select );
+            }
+
+            // Start closed by default
+            $tr.addClass( 'wt-accordion-closed' );
+            $td.hide();
+
+            function updateToggleBtnState( $tr, isClosed ) {
+                var $btn = $tr.find( '.wt-accordion-toggle-btn' );
+                if ( isClosed ) {
+                    $btn.html( '<span class="dashicons dashicons-arrow-down-alt2" style="vertical-align: middle; margin-right: 3px;"></span>Expand for details' );
+                } else {
+                    $btn.html( '<span class="dashicons dashicons-arrow-up-alt2" style="vertical-align: middle; margin-right: 3px;"></span>Collapse details' );
+                }
+            }
+
+            // Toggle accordion when header left or button is clicked
+            $th.find( '.wt-accordion-header-left, .wt-accordion-toggle-btn' ).on( 'click', function ( e ) {
+                e.preventDefault();
+                e.stopPropagation();
+
+                var isClosed = $tr.hasClass( 'wt-accordion-closed' );
+                if ( isClosed ) {
+                    $tr.removeClass( 'wt-accordion-closed' );
+                    $td.slideDown( 150 );
+                    updateToggleBtnState( $tr, false );
+                } else {
+                    $td.slideUp( 150, function () {
+                        $tr.addClass( 'wt-accordion-closed' );
+                    } );
+                    updateToggleBtnState( $tr, true );
+                }
+            } );
+
+            // Prevent clicking directly on select from toggling accordion
+            $th.find( 'select' ).on( 'click change', function ( e ) {
+                e.stopPropagation();
+            } );
+        } );
+
+        // Expand All control
+        $( document ).off( 'click', '#wt-expand-all-attrs' ).on( 'click', '#wt-expand-all-attrs', function () {
+            $( '.wt-attr-mapping-form-table > tbody > tr' ).each( function () {
+                var $tr = $( this );
+                $tr.removeClass( 'wt-accordion-closed' );
+                $tr.children( 'td' ).slideDown( 150 );
+                $tr.find( '.wt-accordion-toggle-btn' ).html( '<span class="dashicons dashicons-arrow-up-alt2" style="vertical-align: middle; margin-right: 3px;"></span>Collapse details' );
+            } );
+        } );
+
+        // Collapse All control
+        $( document ).off( 'click', '#wt-collapse-all-attrs' ).on( 'click', '#wt-collapse-all-attrs', function () {
+            $( '.wt-attr-mapping-form-table > tbody > tr' ).each( function () {
+                var $tr = $( this );
+                $tr.children( 'td' ).slideUp( 150, function () {
+                    $tr.addClass( 'wt-accordion-closed' );
+                } );
+                $tr.find( '.wt-accordion-toggle-btn' ).html( '<span class="dashicons dashicons-arrow-down-alt2" style="vertical-align: middle; margin-right: 3px;"></span>Expand for details' );
+            } );
+        } );
+    }
+
+    function loadAttrValues() {
+        var $btn     = $( '#wt-load-all-mapped-attr-values' );
         var $spinner = $( '#wt-attr-load-spinner' );
 
         $btn.prop( 'disabled', true );
         $spinner.addClass( 'is-active' );
 
         $.post( wooTrendyolAdmin.ajaxUrl, {
-            action:      'trendyol_load_attr_values',
-            nonce:       wooTrendyolAdmin.nonce,
-            category_id: categoryId
+            action:      'trendyol_load_all_mapped_attr_values',
+            nonce:       wooTrendyolAdmin.nonce
         } )
         .done( function ( response ) {
             if ( ! response.success ) {
                 alert( 'Error: ' + response.data.message );
                 return;
             }
-            var data = response.data;
-            attrState.gender.tyValues = data.gender.values   || [];
-            attrState.gender.wcTerms  = data.gender.wc_terms || [];
-            attrState.age.tyValues    = data.age.values      || [];
-            attrState.age.wcTerms     = data.age.wc_terms    || [];
-            renderMappingTable( 'gender', data.saved_maps.gender || {} );
-            renderMappingTable( 'age',    data.saved_maps.age    || {} );
+            var data = response.data || {};
+            var savedMaps = data.saved_maps || {};
+
+            // Dynamically register attributes in attrState
+            if ( data.attributes ) {
+                var needsRefresh = false;
+                $.each( data.attributes, function ( id, attrData ) {
+                    if ( ! $( '#wt-mapping-table-' + id ).length ) {
+                        needsRefresh = true;
+                    }
+                } );
+
+                if ( needsRefresh ) {
+                    alert( 'Global attributes were updated! The page will now reload to display the new fields.' );
+                    window.location.reload();
+                    return;
+                }
+
+                $.each( data.attributes, function ( id, attrData ) {
+                    var currentDomMap = getCurrentMap( id );
+                    var dbMap = savedMaps[ id ] || {};
+                    var mergedMap = $.extend( {}, dbMap, currentDomMap );
+
+                    var $select = $( '#trendyol_global_attr_' + id + '_wc, select[data-slot="' + id + '"]' );
+                    var currentDomWcAttr = $select.length ? $select.val() : '';
+
+                    attrState[ id ] = attrState[ id ] || { wcTerms: [], tyValues: [] };
+                    attrState[ id ].tyValues = attrData.values || [];
+                    attrState[ id ].wcTerms  = attrData.wc_terms || [];
+                    attrState[ id ].allowCustom = attrData.allowCustom || false;
+
+                    if ( ( ! attrData.wc_terms || ! attrData.wc_terms.length ) && currentDomWcAttr ) {
+                        fetchWcTerms( id, currentDomWcAttr );
+                    } else {
+                        renderMappingTable( id, mergedMap );
+                    }
+                } );
+            }
         } )
         .fail( function () {
             alert( 'Request failed. Check your API credentials and try again.' );
@@ -939,12 +1066,16 @@
 
     function fetchWcTerms( slot, wcAttr ) {
         if ( ! wcAttr ) {
-            attrState[ slot ].wcTerms = [];
+            if ( attrState[ slot ] ) {
+                attrState[ slot ].wcTerms = [];
+            }
             $( '#wt-mapping-table-' + slot ).html(
                 '<p class="wt-mapping-placeholder description">Select a WooCommerce attribute, then click "Load Trendyol Values" to build the mapping table.</p>'
             );
             return;
         }
+
+        attrState[ slot ] = attrState[ slot ] || { wcTerms: [], tyValues: [] };
 
         $.post( wooTrendyolAdmin.ajaxUrl, {
             action:  'trendyol_get_wc_terms',
@@ -955,14 +1086,23 @@
         .done( function ( response ) {
             if ( ! response.success ) { return; }
             attrState[ slot ].wcTerms = response.data.wc_terms || [];
-            if ( attrState[ slot ].tyValues.length ) {
-                renderMappingTable( slot, getCurrentMap( slot ) );
-            }
+            renderMappingTable( slot, getCurrentMap( slot ) );
         } );
     }
 
     function getCurrentMap( slot ) {
         var map = {};
+        var $colorRows = $( '#wt-mapping-table-' + slot + ' .wt-mapping-row-color' );
+        if ( $colorRows.length ) {
+            $colorRows.each( function () {
+                var termSlug = $( this ).data( 'wc-term-slug' ).toString();
+                var tyValId = $( this ).find( '.wt-color-dropdown-select' ).val();
+                if ( tyValId ) {
+                    map[ termSlug ] = tyValId;
+                }
+            } );
+            return map;
+        }
         $( '#wt-mapping-table-' + slot + ' .wt-mapping-row' ).each( function () {
             var tyId  = $( this ).data( 'ty-value-id' ).toString();
             var slugs = [];
@@ -974,10 +1114,66 @@
         return map;
     }
 
+    function normalizeMapToTermKey( map ) {
+        var result = {};
+        if ( ! map || typeof map !== 'object' ) return result;
+        $.each( map, function ( key, val ) {
+            if ( Array.isArray( val ) ) {
+                $.each( val, function ( i, termSlug ) {
+                    if ( termSlug ) {
+                        result[ termSlug.toString() ] = key.toString();
+                    }
+                } );
+            } else if ( val !== null && val !== undefined && val !== '' ) {
+                result[ key.toString() ] = val.toString();
+            }
+        } );
+        return result;
+    }
+
+    function normalizeMapToTyKey( map ) {
+        var result = {};
+        if ( ! map || typeof map !== 'object' ) return result;
+        $.each( map, function ( key, val ) {
+            if ( Array.isArray( val ) ) {
+                var tyId = key.toString();
+                result[ tyId ] = result[ tyId ] || [];
+                $.each( val, function ( i, termSlug ) {
+                    if ( termSlug && result[ tyId ].indexOf( termSlug.toString() ) === -1 ) {
+                        result[ tyId ].push( termSlug.toString() );
+                    }
+                } );
+            } else if ( val !== null && val !== undefined && val !== '' ) {
+                var tyId = val.toString();
+                var termSlug = key.toString();
+                result[ tyId ] = result[ tyId ] || [];
+                if ( result[ tyId ].indexOf( termSlug ) === -1 ) {
+                    result[ tyId ].push( termSlug );
+                }
+            }
+        } );
+        return result;
+    }
+
     function renderMappingTable( slot, savedMap ) {
         var $wrap    = $( '#wt-mapping-table-' + slot );
-        var tyValues = attrState[ slot ].tyValues;
-        var wcTerms  = attrState[ slot ].wcTerms;
+        var state    = attrState[ slot ] || {};
+        var tyValues = state.tyValues || [];
+        var wcTerms  = state.wcTerms || [];
+
+        var isCustom = state.allowCustom || slot === 'color_custom' || /\b(web|free|custom|serbest)\b/i.test( state.name || '' );
+        if ( isCustom ) {
+            $wrap.html( '<p class="description" style="color: #007cba; margin-top: 15px;">This attribute accepts free text. No value mapping is required; terms from your selected WooCommerce attribute will be sent exactly as they are.</p>' );
+            return;
+        }
+
+        var selectedWcAttr = $( 'select[data-slot="' + slot + '"]' ).val() || $( 'select[name="' + slot + '"]' ).val() || '';
+        var isDimensionOrMeta = selectedWcAttr && ( selectedWcAttr.indexOf( 'dim_' ) === 0 || selectedWcAttr.indexOf( 'meta:' ) === 0 );
+
+        if ( isDimensionOrMeta ) {
+            $wrap.html( '<p class="description" style="color: #007cba; margin-top: 15px;">Values for this attribute will be sent dynamically from your selected product property/meta field. No term mapping is required.</p>' );
+            return;
+        }
 
         if ( ! tyValues.length ) {
             $wrap.html( '<p class="wt-mapping-placeholder description">No Trendyol values found for this attribute in the selected category.</p>' );
@@ -988,26 +1184,66 @@
             return;
         }
 
+        var termKeyMap = normalizeMapToTermKey( savedMap );
+        var tyKeyMap   = normalizeMapToTyKey( savedMap );
+
         var html = '<table class="wt-mapping-table widefat"><thead><tr>';
         html    += '<th style="width:35%">Trendyol Value</th>';
         html    += '<th>WooCommerce Terms <small>(check all that match)</small></th>';
         html    += '</tr></thead><tbody>';
 
         $.each( tyValues, function ( i, tyVal ) {
-            var tyId        = tyVal.id.toString();
-            var mappedSlugs = savedMap[ tyId ] || [];
+            if ( ! tyVal || ! tyVal.id ) { return; }
+            var tyId = tyVal.id.toString();
+            var mappedSlugs = tyKeyMap[ tyId ] ? tyKeyMap[ tyId ].slice() : [];
+
+            // If no mapped slugs exist in saved map, try to auto-match by name/slug similarity
+            if ( mappedSlugs.length === 0 ) {
+                var tyNameLower = ( tyVal.name || '' ).toLowerCase().trim();
+                if ( tyNameLower ) {
+                    $.each( wcTerms, function ( j, term ) {
+                        if ( ! term || ! term.slug ) { return; }
+                        var termNameLower = ( term.name || '' ).toLowerCase().trim();
+                        var termSlugLower = ( term.slug || '' ).toLowerCase().trim();
+                        var isMatch = false;
+                        
+                        if ( slot == '346' ) { // 346 is Color in Trendyol
+                            // Color / general: check exact match or if one is inside the other
+                            if ( termNameLower === tyNameLower || termSlugLower === tyNameLower ||
+                                 termNameLower.indexOf( tyNameLower ) !== -1 || tyNameLower.indexOf( termNameLower ) !== -1 ) {
+                                isMatch = true;
+                            }
+                        } else {
+                            // Try to match generally
+                            var tyDigits = tyNameLower.replace(/\D/g, '');
+                            var termDigits = termNameLower.replace(/\D/g, '');
+                            if ( tyDigits && termDigits && tyDigits === termDigits ) {
+                                isMatch = true;
+                            } else if ( termNameLower === tyNameLower || termSlugLower === tyNameLower ||
+                                 termNameLower.indexOf( tyNameLower ) !== -1 || tyNameLower.indexOf( termNameLower ) !== -1 ) {
+                                isMatch = true;
+                            }
+                        }
+
+                        if ( isMatch ) {
+                            mappedSlugs.push( term.slug );
+                        }
+                    } );
+                }
+            }
 
             html += '<tr class="wt-mapping-row" data-ty-value-id="' + escHtml( tyId ) + '">';
             html += '<td class="wt-ty-value-label">';
-            html += '<span class="wt-ty-id-badge">' + escHtml( tyVal.name ) + '</span>';
+            html += '<span class="wt-ty-id-badge">' + escHtml( tyVal.name || tyId ) + '</span>';
             html += '<small class="wt-ty-id-num"> #' + escHtml( tyId ) + '</small>';
             html += '</td><td class="wt-wc-terms-cell">';
 
             $.each( wcTerms, function ( j, term ) {
+                if ( ! term || ! term.slug ) { return; }
                 var checked = mappedSlugs.indexOf( term.slug ) !== -1 ? ' checked' : '';
                 html += '<label class="wt-term-checkbox">';
                 html += '<input type="checkbox" value="' + escHtml( term.slug ) + '"' + checked + ' /> ';
-                html += escHtml( term.name );
+                html += escHtml( term.name || term.slug );
                 html += '</label> ';
             } );
 
@@ -1020,12 +1256,15 @@
         $wrap.html( html );
         serializeMappingTable( slot );
 
-        $wrap.on( 'change', 'input[type="checkbox"]', function () {
+        $wrap.off( 'change', 'input[type="checkbox"]' ).on( 'change', 'input[type="checkbox"]', function () {
             serializeMappingTable( slot );
         } );
     }
 
     function serializeMappingTable( slot ) {
+        if ( ! attrState[ slot ].tyValues.length ) {
+            return;
+        }
         var map = getCurrentMap( slot );
         $( '#wt-map-hidden-' + slot ).val( JSON.stringify( map ) );
     }
@@ -1040,6 +1279,16 @@
             var action   = $btn.data( 'action' );
             var $spinner = $btn.siblings( '.spinner' );
             var $result  = $btn.siblings( '.wt-sync-result' );
+
+            if ( 'trendyol_sync_brands' === action ) {
+                var $sidebarBtn = $( '#wt-brand-sync' );
+                if ( $sidebarBtn.length ) {
+                    $sidebarBtn.trigger( 'click' );
+                } else {
+                    $result.addClass( 'wt-notice--error' ).html( 'Brand sync control is not available on this page.' ).show();
+                }
+                return;
+            }
 
             $btn.prop( 'disabled', true );
             $spinner.addClass( 'is-active' );

@@ -112,6 +112,15 @@ class Woo_Trendyol_API_Client {
     private string $storefront_code;
 
     /**
+     * Trendyol Integration Reference Code UUID.
+     *
+     * @since  1.0.0
+     * @access private
+     * @var    string $integration_reference_code
+     */
+    private string $integration_reference_code;
+
+    /**
      * Whether the API connection is enabled in plugin settings.
      *
      * @since  1.0.0
@@ -131,12 +140,14 @@ class Woo_Trendyol_API_Client {
      * @param Woo_Trendyol_Logger $logger Shared logger instance.
      */
     public function __construct( Woo_Trendyol_Logger $logger ) {
-        $this->logger          = $logger;
-        $this->seller_id       = (string) get_option( 'trendyol_seller_id',       '' );
-        $this->api_key         = (string) get_option( 'trendyol_api_key',         '' );
-        $this->api_secret      = (string) get_option( 'trendyol_api_secret',      '' );
-        $this->storefront_code = (string) get_option( 'trendyol_storefront_code', '' );
-        $this->active          = 'yes' === get_option( 'trendyol_api_active', 'no' );
+        $this->logger                     = $logger;
+        $this->seller_id                  = (string) get_option( 'trendyol_seller_id',                  '' );
+        $this->api_key                    = (string) get_option( 'trendyol_api_key',                    '' );
+        $this->api_secret                 = (string) get_option( 'trendyol_api_secret',                 '' );
+        $code                             = (string) get_option( 'trendyol_storefront_code',            'GR' );
+        $this->storefront_code            = ! empty( $code ) ? $code : 'GR';
+        $this->integration_reference_code = (string) get_option( 'trendyol_integration_reference_code', '' );
+        $this->active                     = 'yes' === get_option( 'trendyol_api_active', 'no' );
     }
 
     // -----------------------------------------------------------------------
@@ -219,7 +230,7 @@ class Woo_Trendyol_API_Client {
     /**
      * Update price and inventory for one or more products.
      *
-     * Endpoint: POST /product/sellers/{sellerId}/products/price-and-inventory
+     * Endpoint: POST /inventory/sellers/{sellerId}/products/price-and-inventory
      *
      * @since 1.0.0
      * @param array $items Array of item objects, each containing:
@@ -231,7 +242,73 @@ class Woo_Trendyol_API_Client {
      */
     public function update_price_and_stock( array $items ): array|WP_Error {
         return $this->post(
-            "/product/sellers/{$this->seller_id}/products/price-and-inventory",
+            "/inventory/sellers/{$this->seller_id}/products/price-and-inventory",
+            [ 'items' => $items ]
+        );
+    }
+
+    /**
+     * Update approved product content (title, description, attributes, images).
+     *
+     * Endpoint: POST /product/sellers/{sellerId}/products/content-bulk-update
+     *
+     * @since 1.0.0
+     * @param array $items Array of item objects to update.
+     * @return array|WP_Error Decoded response or WP_Error.
+     */
+    public function update_product_content( array $items ): array|WP_Error {
+        return $this->post(
+            "/product/sellers/{$this->seller_id}/products/content-bulk-update",
+            [ 'items' => $items ]
+        );
+    }
+
+    /**
+     * Fetch unapproved product base data from Trendyol.
+     *
+     * Endpoint: GET /product/sellers/{sellerId}/products/unapproved
+     *
+     * @since 1.0.0
+     * @param string $barcode The product barcode.
+     * @return array|WP_Error First matching unapproved product data, or WP_Error.
+     */
+    public function get_unapproved_product_base( string $barcode ): array|WP_Error {
+        $response = $this->get(
+            "/product/sellers/{$this->seller_id}/products/unapproved",
+            [ 'barcode' => $barcode, 'size' => 1 ]
+        );
+
+        if ( is_wp_error( $response ) ) {
+            return $response;
+        }
+
+        $items = $response['content'] ?? [];
+        if ( empty( $items ) ) {
+            return new WP_Error(
+                'trendyol_not_found',
+                sprintf(
+                    /* translators: %s: product barcode */
+                    __( 'Product with barcode "%s" not found on Trendyol.', 'woo-trendyol' ),
+                    $barcode
+                )
+            );
+        }
+
+        return $items[0];
+    }
+
+    /**
+     * Update unapproved product content (title, description, attributes, images).
+     *
+     * Endpoint: POST /product/sellers/{sellerId}/products/unapproved-bulk-update
+     *
+     * @since 1.0.0
+     * @param array $items Array of item objects to update.
+     * @return array|WP_Error Decoded response or WP_Error.
+     */
+    public function update_unapproved_product_content( array $items ): array|WP_Error {
+        return $this->post(
+            "/product/sellers/{$this->seller_id}/products/unapproved-bulk-update",
             [ 'items' => $items ]
         );
     }
@@ -275,14 +352,7 @@ class Woo_Trendyol_API_Client {
 
         $items = $response['content'] ?? [];
         if ( empty( $items ) ) {
-            return new WP_Error(
-                'trendyol_not_found',
-                sprintf(
-                    /* translators: %s: product barcode */
-                    __( 'Product with barcode "%s" not found on Trendyol.', 'woo-trendyol' ),
-                    $barcode
-                )
-            );
+            return $this->get_unapproved_product_base( $barcode );
         }
 
         return $items[0];
@@ -350,6 +420,42 @@ class Woo_Trendyol_API_Client {
     }
 
     /**
+     * Fetch the attribute values for a specific category and attribute.
+     *
+     * Endpoint: GET /product/categories/{categoryId}/attributes/{attributeId}/values
+     *
+     * @since 1.0.0
+     * @param int $category_id Trendyol leaf-level category ID.
+     * @param int $attribute_id Trendyol attribute ID.
+     * @return array|WP_Error Decoded attribute values or WP_Error.
+     */
+    public function get_attribute_values( int $category_id, int $attribute_id ): array|WP_Error {
+        // Cache in a transient.
+        $cache_key = 'wt_attr_values_' . $category_id . '_' . $attribute_id;
+        $cached    = get_transient( $cache_key );
+
+        if ( false !== $cached ) {
+            return $cached;
+        }
+
+        // We fetch up to 1000 values (predefined limit)
+        $response = $this->get( 
+            "/product/categories/{$category_id}/attributes/{$attribute_id}/values", 
+            [ 'size' => 1000 ], 
+            [ 
+                'Accept-Language' => 'el',
+                'storefront-code' => $this->storefront_code,
+            ] 
+        );
+
+        if ( ! is_wp_error( $response ) ) {
+            set_transient( $cache_key, $response, DAY_IN_SECONDS );
+        }
+
+        return $response;
+    }
+
+    /**
      * Fetch the category tree from Trendyol.
      *
      * Endpoint: GET /product/category-tree
@@ -365,7 +471,10 @@ class Woo_Trendyol_API_Client {
             return $cached;
         }
 
-        $response = $this->get( '/product/category-tree', [], [ 'Accept-Language' => 'el' ] );
+        $response = $this->get( '/product/product-categories', [], [ 
+            'Accept-Language' => 'el',
+            'integration-reference-code' => null,
+        ] );
 
         if ( ! is_wp_error( $response ) ) {
             set_transient( $cache_key, $response, DAY_IN_SECONDS );
@@ -508,6 +617,30 @@ class Woo_Trendyol_API_Client {
         );
     }
 
+    /**
+     * Retrieve a prepared common label (shipping voucher).
+     *
+     * Endpoint: GET /sellers/{sellerId}/common-label/query?id={cargoTrackingNumber}
+     *
+     * @since 1.0.0
+     * @param string $cargo_tracking_number The cargo tracking number.
+     * @return array|WP_Error Decoded response or WP_Error.
+     */
+    public function get_common_label( string $cargo_tracking_number ): array|WP_Error {
+        return $this->get( "/sellers/{$this->seller_id}/common-label/query", [ 'id' => $cargo_tracking_number ] );
+    }
+
+    /**
+     * Fetch a specific shipment package by ID.
+     *
+     * @since 1.0.0
+     * @param string $package_id The Trendyol shipment package ID.
+     * @return array|WP_Error Decoded response or WP_Error.
+     */
+    public function get_shipment_package( string $package_id ): array|WP_Error {
+        return $this->get( "/order/sellers/{$this->seller_id}/orders/shipment-packages", [ 'shipmentPackageIds' => $package_id ] );
+    }
+
     // -----------------------------------------------------------------------
     // Private HTTP helpers
     // -----------------------------------------------------------------------
@@ -595,9 +728,19 @@ class Woo_Trendyol_API_Client {
         ];
 
         // Attach storefront code header when set (required for order endpoints and international marketplace).
-        if ( ! empty( $this->storefront_code ) ) {
-            $args['headers']['storefront-code'] = $this->storefront_code;
+        if ( ! empty( $this->storefront_code ) && ! array_key_exists( 'storeFrontCode', $extra_headers ) ) {
+            $args['headers']['storeFrontCode'] = $this->storefront_code;
         }
+
+        // Attach integration reference code header when set.
+        if ( ! empty( $this->integration_reference_code ) && ! array_key_exists( 'integration-reference-code', $extra_headers ) ) {
+            $args['headers']['integration-reference-code'] = $this->integration_reference_code;
+        }
+
+        // Filter out null or false headers so they are not sent.
+        $args['headers'] = array_filter( $args['headers'], function( $val ) {
+            return $val !== null && $val !== false;
+        } );
 
         // Encode body for PUT/POST requests.
         if ( ! empty( $body ) ) {

@@ -201,6 +201,22 @@ class Woo_Trendyol_Product_Sync {
     }
 
     /**
+     * Sync price and stock when stock is set via woocommerce_product_set_stock or woocommerce_variation_set_stock.
+     *
+     * Hooked to: woocommerce_product_set_stock, woocommerce_variation_set_stock
+     *
+     * @since 1.0.0
+     * @param WC_Product $product The product or variation.
+     */
+    public function on_product_stock_set( WC_Product $product ): void {
+        if ( ! $this->api->is_active() ) {
+            return;
+        }
+
+        $this->sync_price_and_stock( $product );
+    }
+
+    /**
      * Sync product images when a media attachment is updated.
      *
      * Hooked to: edit_attachment
@@ -361,13 +377,9 @@ class Woo_Trendyol_Product_Sync {
             return null;
         }
 
-        $sale_price = (float) ( $product->get_sale_price() ?: $product->get_regular_price() );
-        $list_price = (float) $product->get_regular_price();
-
-        // Trendyol requires listPrice >= salePrice.
-        if ( $list_price < $sale_price ) {
-            $list_price = $sale_price;
-        }
+        $prices     = $this->category_helper->get_final_trendyol_prices( $product );
+        $list_price = $prices['listPrice'];
+        $sale_price = $prices['salePrice'];
 
         // Determine stock quantity.
         $quantity = $product->managing_stock()

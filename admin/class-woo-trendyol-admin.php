@@ -168,7 +168,7 @@ class Woo_Trendyol_Admin {
             $this->plugin_name . '-admin',
             WOO_TRENDYOL_URL . 'admin/js/woo-trendyol-admin.js',
             [ 'jquery' ],
-            $this->version,
+            $this->version . '.' . time(),
             true
         );
 
@@ -241,6 +241,7 @@ class Woo_Trendyol_Admin {
             'trendyol_api_key',
             'trendyol_api_secret',
             'trendyol_storefront_code',
+            'trendyol_integration_reference_code',
             'trendyol_order_poll_interval',
         ];
         foreach ( $api_options as $opt ) {
@@ -256,12 +257,13 @@ class Woo_Trendyol_Admin {
         );
 
         $api_fields = [
-            [ 'trendyol_api_active',          __( 'Enable Integration',        'woo-trendyol' ), 'render_field_toggle'   ],
-            [ 'trendyol_seller_id',           __( 'Seller ID',                 'woo-trendyol' ), 'render_field_text'     ],
-            [ 'trendyol_api_key',             __( 'API Key',                   'woo-trendyol' ), 'render_field_text'     ],
-            [ 'trendyol_api_secret',          __( 'API Secret',                'woo-trendyol' ), 'render_field_password' ],
-            [ 'trendyol_storefront_code',     __( 'Storefront Code',           'woo-trendyol' ), 'render_field_text'     ],
-            [ 'trendyol_order_poll_interval', __( 'Order Poll Interval (min)', 'woo-trendyol' ), 'render_field_number'   ],
+            [ 'trendyol_api_active',                __( 'Enable Integration',        'woo-trendyol' ), 'render_field_toggle'   ],
+            [ 'trendyol_seller_id',                 __( 'Seller ID',                 'woo-trendyol' ), 'render_field_text'     ],
+            [ 'trendyol_api_key',                   __( 'API Key',                   'woo-trendyol' ), 'render_field_text'     ],
+            [ 'trendyol_api_secret',                __( 'API Secret',                'woo-trendyol' ), 'render_field_password' ],
+            [ 'trendyol_storefront_code',           __( 'Storefront Code',           'woo-trendyol' ), 'render_field_text'     ],
+            [ 'trendyol_integration_reference_code', __( 'Integration Reference Code', 'woo-trendyol' ), 'render_field_text'     ],
+            [ 'trendyol_order_poll_interval',       __( 'Order Poll Interval (min)', 'woo-trendyol' ), 'render_field_number'   ],
         ];
 
         foreach ( $api_fields as [ $id, $label, $callback ] ) {
@@ -329,21 +331,12 @@ class Woo_Trendyol_Admin {
         }
 
         // ---- Section 3: Global Attribute Mappings ----
-        // New option model:
-        //  trendyol_global_attr_gender_wc       — pa_* slug of the WC attribute that holds gender
-        //  trendyol_global_attr_gender_map      — JSON: { "trendyol_value_id": ["wc_term_slug", …], … }
-        //  trendyol_global_attr_age_wc          — pa_* slug of the WC attribute that holds age group
-        //  trendyol_global_attr_age_map         — JSON: { "trendyol_value_id": ["wc_term_slug", …], … }
-        //  trendyol_global_attr_brand_wc        — pa_* slug for brand (unchanged)
-        //  trendyol_global_attr_character_wc    — pa_* slug for character (unchanged)
         $attr_options = [
-            'trendyol_global_attr_gender_wc',
-            'trendyol_global_attr_gender_map',
-            'trendyol_global_attr_age_wc',
-            'trendyol_global_attr_age_map',
             'trendyol_global_attr_brand_wc',
             'trendyol_global_attr_character_wc',
         ];
+
+        // Register fixed options
         foreach ( $attr_options as $opt ) {
             register_setting(
                 'woo_trendyol_attrs_settings',
@@ -360,14 +353,101 @@ class Woo_Trendyol_Admin {
         );
 
         $attr_fields = [
-            [ 'trendyol_global_attr_gender_wc',   __( 'Gender — WooCommerce Attribute',   'woo-trendyol' ), 'render_field_global_gender'    ],
-            [ 'trendyol_global_attr_age_wc',      __( 'Age Group — WooCommerce Attribute', 'woo-trendyol' ), 'render_field_global_age'       ],
-            [ 'trendyol_global_attr_brand_wc',    __( 'Brand — WooCommerce Attribute',     'woo-trendyol' ), 'render_field_global_brand'     ],
-            [ 'trendyol_global_attr_character_wc',__( 'Character / Hero — WC Attribute',   'woo-trendyol' ), 'render_field_global_character' ],
+            [ 'trendyol_global_attr_brand_wc',        __( 'Brand — WooCommerce Attribute',              'woo-trendyol' ), 'render_field_global_brand'        ],
+            [ 'trendyol_global_attr_character_wc',    __( 'Character / Hero — WC Attribute',            'woo-trendyol' ), 'render_field_global_character'    ],
         ];
 
         foreach ( $attr_fields as [ $id, $label, $callback ] ) {
             add_settings_field( $id, $label, [ $this, $callback ], 'woo-trendyol-settings', 'woo_trendyol_attrs_section', [ 'label_for' => $id ] );
+        }
+
+        // Register dynamic discovered attributes
+        $discovered = get_option( 'trendyol_discovered_global_attrs', [] );
+        if ( is_array( $discovered ) ) {
+            foreach ( $discovered as $g_attr ) {
+                $attr_id = (string) ( $g_attr['id'] ?? '' );
+                if ( empty( $attr_id ) ) {
+                    continue;
+                }
+                
+                $wc_opt  = 'trendyol_global_attr_' . $attr_id . '_wc';
+                $map_opt = 'trendyol_global_attr_' . $attr_id . '_map';
+
+                register_setting( 'woo_trendyol_attrs_settings', $wc_opt, [ 'sanitize_callback' => [ $this, 'sanitize_attr_option' ] ] );
+                register_setting( 'woo_trendyol_attrs_settings', $map_opt, [ 'sanitize_callback' => [ $this, 'sanitize_attr_option' ] ] );
+
+                $clean_name = preg_replace( '/\s*\(\s*Free Text\s*\)/i', '', (string) ( $g_attr['name'] ?? '' ) );
+                add_settings_field(
+                    $wc_opt,
+                    sprintf( __( '%s — WooCommerce Attribute', 'woo-trendyol' ), esc_html( $clean_name ) ),
+                    function( $args ) use ( $attr_id, $g_attr, $clean_name, $wc_opt, $map_opt ) {
+                        $desc = sprintf( __( 'Map WooCommerce terms to Trendyol values for %s.', 'woo-trendyol' ), esc_html( $clean_name ) );
+                        if ( ! empty( $g_attr['categories'] ) ) {
+                            $cat_names = array_unique( $g_attr['categories'] );
+                            $desc .= '<br><span style="font-size: 11px; color: #666;">' . sprintf( __( 'Mandatory in categories: %s', 'woo-trendyol' ), esc_html( implode( ', ', $cat_names ) ) ) . '</span>';
+                        }
+                        
+                        $is_free_text = ! empty( $g_attr['allowCustom'] ) || (bool) preg_match( '/\b(web|free|custom|serbest)\b/i', (string) ( $g_attr['name'] ?? '' ) );
+
+                        $this->render_attr_mapping_field(
+                            $attr_id,
+                            $wc_opt,
+                            $map_opt,
+                            $desc,
+                            $is_free_text,
+                            $is_free_text
+                        );
+                    },
+                    'woo-trendyol-settings',
+                    'woo_trendyol_attrs_section',
+                    [ 'label_for' => $wc_opt ]
+                );
+            }
+        }
+
+        // ---- Section 4: Price Rules ----
+        $price_options = [
+            'trendyol_price_rule_fixed_enabled',
+            'trendyol_price_rule_fixed_amount',
+            'trendyol_price_rule_percentage_enabled',
+            'trendyol_price_rule_percentage',
+            'trendyol_price_rule_vw_enabled',
+            'trendyol_price_rule_vw_under_1',
+            'trendyol_price_rule_vw_1_to_2',
+            'trendyol_price_rule_vw_2_to_3',
+            'trendyol_price_rule_vw_over_3_fixed',
+            'trendyol_price_rule_vw_over_3_coef',
+            'trendyol_price_rule_vw_zero_dimensions_amount',
+            'trendyol_price_rule_min_bulk_push_price',
+        ];
+        foreach ( $price_options as $opt ) {
+            register_setting( 'woo_trendyol_price_rules_settings', $opt, [ 'sanitize_callback' => 'sanitize_text_field' ] );
+        }
+
+        add_settings_section(
+            'woo_trendyol_price_rules_section',
+            __( 'Price Rules', 'woo-trendyol' ),
+            [ $this, 'render_price_rules_section_description' ],
+            'woo-trendyol-settings'
+        );
+
+        $price_fields = [
+            [ 'trendyol_price_rule_fixed_enabled',    __( 'Enable Fixed Amount Adjustment',              'woo-trendyol' ), 'render_field_price_fixed_toggle' ],
+            [ 'trendyol_price_rule_fixed_amount',     __( 'Fixed Amount to Add',                         'woo-trendyol' ), 'render_field_price_fixed_amount' ],
+            [ 'trendyol_price_rule_percentage_enabled', __( 'Enable Percentage Adjustment',              'woo-trendyol' ), 'render_field_price_pct_toggle'   ],
+            [ 'trendyol_price_rule_percentage',       __( 'Percentage to Add (%)',                       'woo-trendyol' ), 'render_field_price_pct_amount'   ],
+            [ 'trendyol_price_rule_vw_enabled',       __( 'Enable Volumetric Weight Adjustment',         'woo-trendyol' ), 'render_field_price_vw_toggle'    ],
+            [ 'trendyol_price_rule_vw_under_1',       __( 'Volumetric Weight < 1: Add Amount',           'woo-trendyol' ), 'render_field_price_vw_under_1'   ],
+            [ 'trendyol_price_rule_vw_1_to_2',       __( 'Volumetric Weight 1 to 2: Add Amount',         'woo-trendyol' ), 'render_field_price_vw_1_to_2'   ],
+            [ 'trendyol_price_rule_vw_2_to_3',       __( 'Volumetric Weight 2 to 3: Add Amount',         'woo-trendyol' ), 'render_field_price_vw_2_to_3'   ],
+            [ 'trendyol_price_rule_vw_over_3_fixed',  __( 'Volumetric Weight > 3: Base Fixed Amount',     'woo-trendyol' ), 'render_field_price_vw_over_3_fixed' ],
+            [ 'trendyol_price_rule_vw_over_3_coef',   __( 'Volumetric Weight > 3: Coefficient (per kg)',   'woo-trendyol' ), 'render_field_price_vw_over_3_coef'  ],
+            [ 'trendyol_price_rule_vw_zero_dimensions_amount', __( 'Zero Dimensions Fixed Amount',     'woo-trendyol' ), 'render_field_price_vw_zero_dimensions' ],
+            [ 'trendyol_price_rule_min_bulk_push_price', __( 'Minimum Price for Bulk Push',                 'woo-trendyol' ), 'render_field_price_min_bulk_push' ],
+        ];
+
+        foreach ( $price_fields as [ $id, $label, $callback ] ) {
+            add_settings_field( $id, $label, [ $this, $callback ], 'woo-trendyol-settings', 'woo_trendyol_price_rules_section', [ 'label_for' => $id ] );
         }
     }
 
@@ -390,7 +470,7 @@ class Woo_Trendyol_Admin {
             return '';
         }
 
-        $trimmed = trim( $value );
+        $trimmed = trim( wp_unslash( $value ) );
 
         // Allow the WC Brands sentinel value through without modification.
         if ( '__wc_brands__' === $trimmed ) {
@@ -426,7 +506,7 @@ class Woo_Trendyol_Admin {
         }
 
         // Determine the active tab. Whitelist the allowed slugs.
-        $allowed_tabs = [ 'credentials', 'defaults', 'attributes' ];
+        $allowed_tabs = [ 'credentials', 'defaults', 'attributes', 'sync', 'price_rules', 'tools' ];
         $active_tab   = isset( $_GET['tab'] ) ? sanitize_key( $_GET['tab'] ) : 'credentials'; // phpcs:ignore WordPress.Security.NonceVerification
         if ( ! in_array( $active_tab, $allowed_tabs, true ) ) {
             $active_tab = 'credentials';
@@ -471,15 +551,12 @@ class Woo_Trendyol_Admin {
      * @since 1.0.0
      */
     public function render_attrs_section_description(): void {
-        echo '<p>' . esc_html__( 'Map WooCommerce attributes to their Trendyol equivalents. These global mappings are applied first before per-category or per-product attribute mappings. Optional attributes are always omitted.', 'woo-trendyol' ) . '</p>';
-        echo '<p>' . wp_kses_post( __( 'For <strong>Gender</strong> and <strong>Age Group</strong>: first select the WooCommerce attribute that holds those values, then map each Trendyol value to one or more of your WooCommerce terms. Age supports many-to-one mapping (e.g. "από 3 ετών" and "από 4 ετών" can both map to the Trendyol "3-4 Yaş" value).', 'woo-trendyol' ) ) . '</p>';
-        echo '<p class="description">' . esc_html__( 'Trendyol gender and age values are category-specific. Enter a sample Trendyol category ID below to load the available values for mapping.', 'woo-trendyol' ) . '</p>';
-        echo '<div class="wt-attr-category-loader">';
-        echo '<label for="wt-attr-sample-category"><strong>' . esc_html__( 'Sample Trendyol Category ID:', 'woo-trendyol' ) . '</strong></label> ';
-        echo '<input type="number" id="wt-attr-sample-category" class="small-text" placeholder="e.g. 1082" min="1" /> ';
-        echo '<button type="button" class="button" id="wt-load-attr-values">' . esc_html__( 'Load Trendyol Values', 'woo-trendyol' ) . '</button>';
+        echo '<p>' . esc_html__( 'Map WooCommerce attributes to their Trendyol equivalents. These global mappings are applied automatically across all categories. Dynamic attributes appearing as required in 2 or more categories are listed below.', 'woo-trendyol' ) . '</p>';
+        echo '<p>' . wp_kses_post( __( 'First select the WooCommerce attribute, then map each Trendyol value to one or more of your WooCommerce terms.', 'woo-trendyol' ) ) . '</p>';
+        echo '<div class="wt-attr-category-loader" style="margin-bottom: 20px;">';
+        echo '<button type="button" class="button button-primary" id="wt-load-all-mapped-attr-values">' . esc_html__( 'Load/Refresh Global Attributes', 'woo-trendyol' ) . '</button>';
         echo '<span id="wt-attr-load-spinner" class="spinner" style="float:none;margin-top:0;"></span>';
-        echo '<p class="description">' . esc_html__( 'Trendyol gender and age attribute values differ per category. Enter any leaf-level category ID from your catalogue to fetch the available values.', 'woo-trendyol' ) . '</p>';
+        echo '<p class="description">' . esc_html__( 'Click to scan all mapped WooCommerce categories and dynamically discover required attributes. Then, load their values to map.', 'woo-trendyol' ) . '</p>';
         echo '</div>';
     }
 
@@ -509,6 +586,101 @@ class Woo_Trendyol_Admin {
                 : '<span class="wt-badge wt-badge--inactive">' . esc_html__( 'Inactive', 'woo-trendyol' ) . '</span>'; ?>
         </span>
         <?php
+    }
+
+    /**
+     * Render Price Rules section description.
+     */
+    public function render_price_rules_section_description(): void {
+        echo '<p class="description">' . esc_html__( 'Configure global pricing adjustment rules for products sent to Trendyol. Check the switches to activate and configure specific adjustments. These rules will be applied globally, but can be overridden at the product or category level.', 'woo-trendyol' ) . '</p>';
+    }
+
+    public function render_field_price_fixed_toggle(): void {
+        $value = get_option( 'trendyol_price_rule_fixed_enabled', 'no' );
+        ?>
+        <label class="wt-toggle-switch">
+            <input type="checkbox"
+                   id="trendyol_price_rule_fixed_enabled"
+                   name="trendyol_price_rule_fixed_enabled"
+                   value="yes"
+                   <?php checked( $value, 'yes' ); ?> />
+            <span class="wt-toggle-slider"></span>
+        </label>
+        <?php
+    }
+
+    public function render_field_price_fixed_amount(): void {
+        $value = get_option( 'trendyol_price_rule_fixed_amount', '0' );
+        echo '<input type="number" step="0.01" id="trendyol_price_rule_fixed_amount" name="trendyol_price_rule_fixed_amount" value="' . esc_attr( $value ) . '" class="small-text" /> EUR';
+    }
+
+    public function render_field_price_pct_toggle(): void {
+        $value = get_option( 'trendyol_price_rule_percentage_enabled', 'no' );
+        ?>
+        <label class="wt-toggle-switch">
+            <input type="checkbox"
+                   id="trendyol_price_rule_percentage_enabled"
+                   name="trendyol_price_rule_percentage_enabled"
+                   value="yes"
+                   <?php checked( $value, 'yes' ); ?> />
+            <span class="wt-toggle-slider"></span>
+        </label>
+        <?php
+    }
+
+    public function render_field_price_pct_amount(): void {
+        $value = get_option( 'trendyol_price_rule_percentage', '0' );
+        echo '<input type="number" step="0.01" id="trendyol_price_rule_percentage" name="trendyol_price_rule_percentage" value="' . esc_attr( $value ) . '" class="small-text" /> %';
+    }
+
+    public function render_field_price_vw_toggle(): void {
+        $value = get_option( 'trendyol_price_rule_vw_enabled', 'no' );
+        ?>
+        <label class="wt-toggle-switch">
+            <input type="checkbox"
+                   id="trendyol_price_rule_vw_enabled"
+                   name="trendyol_price_rule_vw_enabled"
+                   value="yes"
+                   <?php checked( $value, 'yes' ); ?> />
+            <span class="wt-toggle-slider"></span>
+        </label>
+        <?php
+    }
+
+    public function render_field_price_vw_under_1(): void {
+        $value = get_option( 'trendyol_price_rule_vw_under_1', '0' );
+        echo '<input type="number" step="0.01" id="trendyol_price_rule_vw_under_1" name="trendyol_price_rule_vw_under_1" value="' . esc_attr( $value ) . '" class="small-text" /> EUR';
+    }
+
+    public function render_field_price_vw_1_to_2(): void {
+        $value = get_option( 'trendyol_price_rule_vw_1_to_2', '0' );
+        echo '<input type="number" step="0.01" id="trendyol_price_rule_vw_1_to_2" name="trendyol_price_rule_vw_1_to_2" value="' . esc_attr( $value ) . '" class="small-text" /> EUR';
+    }
+
+    public function render_field_price_vw_2_to_3(): void {
+        $value = get_option( 'trendyol_price_rule_vw_2_to_3', '0' );
+        echo '<input type="number" step="0.01" id="trendyol_price_rule_vw_2_to_3" name="trendyol_price_rule_vw_2_to_3" value="' . esc_attr( $value ) . '" class="small-text" /> EUR';
+    }
+
+    public function render_field_price_vw_over_3_fixed(): void {
+        $value = get_option( 'trendyol_price_rule_vw_over_3_fixed', '0' );
+        echo '<input type="number" step="0.01" id="trendyol_price_rule_vw_over_3_fixed" name="trendyol_price_rule_vw_over_3_fixed" value="' . esc_attr( $value ) . '" class="small-text" /> EUR';
+    }
+
+    public function render_field_price_vw_over_3_coef(): void {
+        $value = get_option( 'trendyol_price_rule_vw_over_3_coef', '0' );
+        echo '<input type="number" step="0.01" id="trendyol_price_rule_vw_over_3_coef" name="trendyol_price_rule_vw_over_3_coef" value="' . esc_attr( $value ) . '" class="small-text" /> EUR/kg';
+    }
+
+    public function render_field_price_vw_zero_dimensions(): void {
+        $value = get_option( 'trendyol_price_rule_vw_zero_dimensions_amount', '0' );
+        echo '<input type="number" step="0.01" id="trendyol_price_rule_vw_zero_dimensions_amount" name="trendyol_price_rule_vw_zero_dimensions_amount" value="' . esc_attr( $value ) . '" class="small-text" /> EUR';
+    }
+
+    public function render_field_price_min_bulk_push(): void {
+        $value = get_option( 'trendyol_price_rule_min_bulk_push_price', '' );
+        echo '<input type="number" step="0.01" id="trendyol_price_rule_min_bulk_push_price" name="trendyol_price_rule_min_bulk_push_price" value="' . esc_attr( $value ) . '" class="small-text" /> EUR';
+        echo '<p class="description">' . esc_html__( 'If set, products with a calculated Trendyol price less than this amount will be skipped during Bulk Push. They can still be pushed individually from their product edit page.', 'woo-trendyol' ) . '</p>';
     }
 
     /**
@@ -851,7 +1023,9 @@ class Woo_Trendyol_Admin {
         string $slot,
         string $wc_opt,
         string $map_opt,
-        string $description
+        string $description,
+        bool $allow_custom = false,
+        bool $no_predefined_values = false
     ): void {
         $current_wc  = get_option( $wc_opt,  '' );
         $current_map = get_option( $map_opt, '' );
@@ -864,6 +1038,12 @@ class Woo_Trendyol_Admin {
             if ( is_array( $decoded ) ) {
                 $map_decoded = $decoded;
             }
+        }
+
+        // Fetch names cache to display names instead of just IDs.
+        $names_cache = get_option( 'trendyol_global_attr_names_cache', [] );
+        if ( ! is_array( $names_cache ) ) {
+            $names_cache = [];
         }
 
         // Fetch WC terms for the currently selected attribute (for pre-rendering).
@@ -888,21 +1068,72 @@ class Woo_Trendyol_Admin {
                         name="<?php echo esc_attr( $wc_opt ); ?>"
                         class="wt-wc-attr-selector"
                         data-slot="<?php echo esc_attr( $slot ); ?>">
-                    <option value=""><?php esc_html_e( '— Select WC attribute —', 'woo-trendyol' ); ?></option>
-                    <?php foreach ( $wc_attrs as $attr ) : ?>
-                        <option value="pa_<?php echo esc_attr( $attr->attribute_name ); ?>"
-                            <?php selected( $current_wc, 'pa_' . $attr->attribute_name ); ?>>
-                            <?php echo esc_html( $attr->attribute_label ); ?>
-                            (pa_<?php echo esc_attr( $attr->attribute_name ); ?>)
-                        </option>
-                    <?php endforeach; ?>
+                    <option value=""><?php esc_html_e( '— Select Attribute Source —', 'woo-trendyol' ); ?></option>
+
+                    <?php if ( ! empty( $wc_attrs ) ) : ?>
+                        <optgroup label="<?php esc_attr_e( 'WooCommerce Product Attributes (pa_*)', 'woo-trendyol' ); ?>">
+                            <?php foreach ( $wc_attrs as $attr ) : ?>
+                                <option value="pa_<?php echo esc_attr( $attr->attribute_name ); ?>"
+                                    <?php selected( $current_wc, 'pa_' . $attr->attribute_name ); ?>>
+                                    <?php echo esc_html( $attr->attribute_label ); ?>
+                                    (pa_<?php echo esc_attr( $attr->attribute_name ); ?>)
+                                </option>
+                            <?php endforeach; ?>
+                        </optgroup>
+                    <?php endif; ?>
+
+                    <optgroup label="<?php esc_attr_e( 'Product Dimensions & Physical Attributes', 'woo-trendyol' ); ?>">
+                        <option value="dim_length" <?php selected( $current_wc, 'dim_length' ); ?>><?php esc_html_e( 'Product Length (cm)', 'woo-trendyol' ); ?></option>
+                        <option value="dim_width" <?php selected( $current_wc, 'dim_width' ); ?>><?php esc_html_e( 'Product Width (cm)', 'woo-trendyol' ); ?></option>
+                        <option value="dim_height" <?php selected( $current_wc, 'dim_height' ); ?>><?php esc_html_e( 'Product Height (cm)', 'woo-trendyol' ); ?></option>
+                        <option value="dim_weight" <?php selected( $current_wc, 'dim_weight' ); ?>><?php esc_html_e( 'Product Weight (kg)', 'woo-trendyol' ); ?></option>
+                    </optgroup>
+
+                    <optgroup label="<?php esc_attr_e( 'Product Custom Meta / Post Meta', 'woo-trendyol' ); ?>">
+                        <?php if ( $current_wc && 0 === strpos( $current_wc, 'meta:' ) ) : ?>
+                            <option value="<?php echo esc_attr( $current_wc ); ?>" selected="selected">
+                                <?php echo esc_html( sprintf( __( 'Custom Meta: %s', 'woo-trendyol' ), substr( $current_wc, 5 ) ) ); ?>
+                            </option>
+                        <?php endif; ?>
+                        <option value="custom_meta_prompt"><?php esc_html_e( '+ Enter Custom Meta Key...', 'woo-trendyol' ); ?></option>
+                    </optgroup>
                 </select>
-                <p class="description"><?php echo esc_html( $description ); ?></p>
+                <p class="description"><?php echo wp_kses_post( $description ); ?></p>
             </div>
 
             <!-- Step 2: Value mapping table (rendered/updated by JS) -->
             <div class="wt-attr-mapping-table-wrap" id="wt-mapping-table-<?php echo esc_attr( $slot ); ?>">
-                <?php if ( ! empty( $wc_terms ) && ! empty( $map_decoded ) ) : ?>
+                <?php if ( $no_predefined_values ) : ?>
+                    <p class="description" style="color: #007cba; margin-top: 15px;">
+                        <?php esc_html_e( 'This attribute accepts free text. No value mapping is required; terms from your selected WooCommerce attribute will be sent exactly as they are.', 'woo-trendyol' ); ?>
+                    </p>
+                    <input type="hidden"
+                           name="<?php echo esc_attr( $map_opt ); ?>"
+                           id="wt-map-hidden-<?php echo esc_attr( $slot ); ?>"
+                           value="<?php echo esc_attr( $current_map ); ?>" />
+                <?php elseif ( ! empty( $wc_terms ) && ! empty( $map_decoded ) && is_array( $map_decoded ) ) : 
+                    $normalized_map = [];
+                    $first_val = reset( $map_decoded );
+                    if ( ! is_array( $first_val ) ) {
+                        // Old Format: { term_slug: ty_val_id }
+                        foreach ( $map_decoded as $term_slug => $ty_val_id ) {
+                            if ( empty( $ty_val_id ) ) { continue; }
+                            $ty_id_str = (string) $ty_val_id;
+                            if ( ! isset( $normalized_map[ $ty_id_str ] ) ) {
+                                $normalized_map[ $ty_id_str ] = [];
+                            }
+                            if ( ! in_array( (string) $term_slug, $normalized_map[ $ty_id_str ], true ) ) {
+                                $normalized_map[ $ty_id_str ][] = (string) $term_slug;
+                            }
+                        }
+                    } else {
+                        // Format: { ty_val_id: [ term_slugs ] }
+                        foreach ( $map_decoded as $ty_val_id => $slugs ) {
+                            $ty_id_str = (string) $ty_val_id;
+                            $normalized_map[ $ty_id_str ] = array_map( 'strval', (array) $slugs );
+                        }
+                    }
+                ?>
                     <table class="wt-mapping-table widefat">
                         <thead>
                             <tr>
@@ -911,20 +1142,19 @@ class Woo_Trendyol_Admin {
                             </tr>
                         </thead>
                         <tbody>
-                            <?php foreach ( $map_decoded as $ty_value_id => $mapped_slugs ) : ?>
+                            <?php foreach ( $normalized_map as $ty_value_id => $mapped_slugs ) : ?>
                                 <?php
-                                // We only have the ID at this point; the label is fetched by JS.
-                                // On initial render we show the ID as a placeholder.
+                                $ty_name = $names_cache[ $ty_value_id ] ?? $ty_value_id;
                                 ?>
-                                <tr data-ty-value-id="<?php echo esc_attr( $ty_value_id ); ?>">
+                                <tr class="wt-mapping-row" data-ty-value-id="<?php echo esc_attr( $ty_value_id ); ?>">
                                     <td class="wt-ty-value-label">
-                                        <span class="wt-ty-id-badge"><?php echo esc_html( $ty_value_id ); ?></span>
+                                        <span class="wt-ty-id-badge"><?php echo esc_html( $ty_name ); ?></span>
+                                        <small class="wt-ty-id-num"> #<?php echo esc_html( $ty_value_id ); ?></small>
                                     </td>
                                     <td>
                                         <?php foreach ( $wc_terms as $term ) : ?>
                                             <label class="wt-term-checkbox">
                                                 <input type="checkbox"
-                                                    name="<?php echo esc_attr( $map_opt ); ?>[<?php echo esc_attr( $ty_value_id ); ?>][]"
                                                     value="<?php echo esc_attr( $term['slug'] ); ?>"
                                                     <?php checked( in_array( $term['slug'], (array) $mapped_slugs, true ) ); ?> />
                                                 <?php echo esc_html( $term['name'] ); ?>
@@ -984,7 +1214,56 @@ class Woo_Trendyol_Admin {
             'age',
             'trendyol_global_attr_age_wc',
             'trendyol_global_attr_age_map',
-            __( 'Select the WooCommerce attribute that stores age group (e.g. pa_age). Multiple WC terms can map to a single Trendyol age value — useful for granular age ranges like "από 3 ετών" and "από 4 ετών" mapping to one Trendyol bracket.', 'woo-trendyol' )
+            __( 'Select the WooCommerce attribute that stores Age (e.g. pa_age). Multiple WC terms can map to a single Trendyol age value.', 'woo-trendyol' )
+        );
+    }
+
+    /**
+     * Render the Age Group WC attribute selector and value mapping table.
+     *
+     * Supports many-to-one mapping.
+     *
+     * @since 1.0.0
+     * @param array $args Field arguments.
+     */
+    public function render_field_global_age_group( array $args ): void {
+        $this->render_attr_mapping_field(
+            'age_group',
+            'trendyol_global_attr_age_group_wc',
+            'trendyol_global_attr_age_group_map',
+            __( 'Select the WooCommerce attribute that stores Age Group (e.g. pa_age_group). Multiple WC terms can map to a single Trendyol age value — useful for granular age ranges like "από 3 ετών" and "από 4 ετών" mapping to one Trendyol bracket.', 'woo-trendyol' )
+        );
+    }
+
+    /**
+     * Render the Color WC attribute selector and value mapping table.
+     *
+     * @since 1.0.0
+     * @param array $args Field arguments.
+     */
+    public function render_field_global_color( array $args ): void {
+        $this->render_attr_mapping_field(
+            'color',
+            'trendyol_global_attr_color_wc',
+            'trendyol_global_attr_color_map',
+            __( 'Select the WooCommerce attribute that stores color (e.g. pa_color). Each Trendyol color value will then be mapped to one or more of its terms.', 'woo-trendyol' )
+        );
+    }
+
+    /**
+     * Render the Custom Color WC attribute selector.
+     *
+     * @since 1.0.0
+     * @param array $args Field arguments.
+     */
+    public function render_field_global_color_custom( array $args ): void {
+        $this->render_attr_mapping_field(
+            'color_custom',
+            'trendyol_global_attr_color_custom_wc',
+            'trendyol_global_attr_color_custom_map',
+            __( 'Select the WooCommerce attribute that stores custom colors (e.g. pa_color). Since custom values are allowed, you do not need to map values; the WooCommerce term name will be sent directly.', 'woo-trendyol' ),
+            true,
+            true
         );
     }
 
@@ -1183,6 +1462,48 @@ class Woo_Trendyol_Admin {
             ? __( 'Product override', 'woo-trendyol' )
             : __( 'Category mapping', 'woo-trendyol' );
 
+        // ---- Price override ----
+        $price_override  = get_post_meta( $post_id, '_trendyol_price_override', true );
+
+        // ---- Calculated price display ----
+        $calculated_price_display = '';
+        $product_obj = wc_get_product( $post_id );
+        if ( $product_obj ) {
+            if ( $product_obj->is_type( 'variable' ) ) {
+                $prices = [];
+                foreach ( $product_obj->get_children() as $child_id ) {
+                    $variation = wc_get_product( $child_id );
+                    if ( $variation ) {
+                        $v_prices = $this->category_helper->get_final_trendyol_prices( $variation );
+                        $prices[] = $v_prices['listPrice'];
+                        $prices[] = $v_prices['salePrice'];
+                    }
+                }
+                if ( ! empty( $prices ) ) {
+                    $min_price = min( $prices );
+                    $max_price = max( $prices );
+                    if ( $min_price === $max_price ) {
+                        $calculated_price_display = number_format( $min_price, 2 ) . ' &euro;';
+                    } else {
+                        $calculated_price_display = number_format( $min_price, 2 ) . ' &euro; - ' . number_format( $max_price, 2 ) . ' &euro;';
+                    }
+                } else {
+                    $calculated_price_display = __( 'N/A', 'woo-trendyol' );
+                }
+            } else {
+                $calculated_prices = $this->category_helper->get_final_trendyol_prices( $product_obj );
+                if ( $calculated_prices['salePrice'] < $calculated_prices['listPrice'] ) {
+                    $calculated_price_display = sprintf(
+                        __( '%1$s &euro; (List) / %2$s &euro; (Sale)', 'woo-trendyol' ),
+                        number_format( $calculated_prices['listPrice'], 2 ),
+                        number_format( $calculated_prices['salePrice'], 2 )
+                    );
+                } else {
+                    $calculated_price_display = number_format( $calculated_prices['listPrice'], 2 ) . ' &euro;';
+                }
+            }
+        }
+
         // ---- Last sync human diff ----
         $last_sync_human = $last_sync
             ? sprintf(
@@ -1226,6 +1547,16 @@ class Woo_Trendyol_Admin {
             : '';
 
         $this->category_helper->save_override( $post_id, $override );
+
+        $price_override = isset( $_POST['_trendyol_price_override'] )
+            ? sanitize_text_field( wp_unslash( $_POST['_trendyol_price_override'] ) )
+            : '';
+
+        if ( '' !== $price_override ) {
+            update_post_meta( $post_id, '_trendyol_price_override', $price_override );
+        } else {
+            delete_post_meta( $post_id, '_trendyol_price_override' );
+        }
     }
 
     // -----------------------------------------------------------------------
@@ -1304,12 +1635,12 @@ class Woo_Trendyol_Admin {
             wp_send_json_error( [ 'message' => __( 'Product not found.', 'woo-trendyol' ) ] );
         }
 
-        $sku = $product->get_sku();
-        if ( empty( $sku ) ) {
-            wp_send_json_error( [ 'message' => __( 'Product has no SKU. Cannot fetch Trendyol status.', 'woo-trendyol' ) ] );
+        $barcode = $this->product_creator->resolve_barcode( $product );
+        if ( empty( $barcode ) ) {
+            wp_send_json_error( [ 'message' => __( 'Product has no barcode. Cannot fetch Trendyol status.', 'woo-trendyol' ) ] );
         }
 
-        $trendyol_product = $this->api->get_product_base( $sku );
+        $trendyol_product = $this->api->get_product_base( $barcode );
 
         if ( is_wp_error( $trendyol_product ) ) {
             wp_send_json_error( [ 'message' => $trendyol_product->get_error_message() ] );
@@ -1350,7 +1681,8 @@ class Woo_Trendyol_Admin {
             wp_send_json_error( [ 'message' => __( 'Permission denied.', 'woo-trendyol' ) ] );
         }
 
-        $only_unmapped = isset( $_POST['only_unmapped'] ) && '1' === $_POST['only_unmapped'];
+        $only_unmapped        = isset( $_POST['only_unmapped'] ) && '1' === $_POST['only_unmapped'];
+        $include_out_of_stock = isset( $_POST['include_out_of_stock'] ) && '1' === $_POST['include_out_of_stock'];
 
         $args = [
             'post_type'      => 'product',
@@ -1376,7 +1708,87 @@ class Woo_Trendyol_Admin {
 
         $product_ids = get_posts( $args );
 
-        wp_send_json_success( [ 'product_ids' => array_map( 'intval', $product_ids ) ] );
+        $min_price_opt = get_option( 'trendyol_price_rule_min_bulk_push_price', '' );
+        $min_price     = ( '' !== $min_price_opt && is_numeric( $min_price_opt ) ) ? (float) $min_price_opt : null;
+
+        $filtered_ids = [];
+        $omitted_count = 0;
+
+        foreach ( $product_ids as $pid ) {
+            $product = wc_get_product( $pid );
+            if ( ! $product ) {
+                $omitted_count++;
+                continue;
+            }
+
+            // Check stock status if we are not including out of stock items
+            if ( ! $include_out_of_stock && ! $product->is_in_stock() ) {
+                $omitted_count++;
+                continue;
+            }
+
+            // Exclude products if their category is excluded from bulk push
+            $action_type = isset( $_POST['action_type'] ) ? sanitize_text_field( wp_unslash( $_POST['action_type'] ) ) : '';
+            if ( 'push' === $action_type ) {
+                $terms = wp_get_post_terms( $pid, 'product_cat', [ 'fields' => 'ids' ] );
+                if ( ! is_wp_error( $terms ) && ! empty( $terms ) ) {
+                    $is_excluded = false;
+                    $cat_helper  = new Woo_Trendyol_Category_Helper();
+                    foreach ( $terms as $term_id ) {
+                        if ( 'yes' === $cat_helper->get_inherited_term_meta( $term_id, 'trendyol_exclude_bulk_push' ) ) {
+                            $is_excluded = true;
+                            break;
+                        }
+                    }
+                    if ( $is_excluded ) {
+                        $omitted_count++;
+                        continue;
+                    }
+                }
+            }
+
+            // Check if product is mapped
+            if ( ! $this->product_creator->validate_mapping( $product ) ) {
+                $omitted_count++;
+                continue;
+            }
+
+            if ( null !== $min_price ) {
+                if ( $product->is_type( 'variable' ) ) {
+                    $has_valid_variation = false;
+                    foreach ( $product->get_children() as $child_id ) {
+                        $variation = wc_get_product( $child_id );
+                        if ( $variation && ( $include_out_of_stock || $variation->is_in_stock() ) ) {
+                            $v_prices = $this->category_helper->get_final_trendyol_prices( $variation );
+                            if ( $v_prices['salePrice'] >= $min_price ) {
+                                $has_valid_variation = true;
+                                break;
+                            }
+                        }
+                    }
+                    if ( ! $has_valid_variation ) {
+                        $omitted_count++;
+                        continue;
+                    }
+                } else {
+                    $v_prices = $this->category_helper->get_final_trendyol_prices( $product );
+                    if ( $v_prices['salePrice'] < $min_price ) {
+                        $omitted_count++;
+                        continue;
+                    }
+                }
+            }
+
+            $filtered_ids[] = $pid;
+        }
+
+        $product_ids = $filtered_ids;
+
+        wp_send_json_success( [
+            'product_ids'   => array_map( 'intval', $product_ids ),
+            'omitted_count' => $omitted_count,
+            'message'       => sprintf( __( 'Found %1$d products to push. %2$d products were omitted due to missing mapping, stock status, or price limits.', 'woo-trendyol' ), count( $product_ids ), $omitted_count )
+        ] );
     }
 
     /**
@@ -1405,7 +1817,42 @@ class Woo_Trendyol_Admin {
         }
 
         $product_ids = array_map( 'absint', $raw_ids );
-        $result      = $this->product_creator->push_products( $product_ids );
+        $result      = $this->product_creator->push_products( $product_ids, true );
+
+        if ( is_wp_error( $result ) ) {
+            wp_send_json_error( [ 'message' => $result->get_error_message() ] );
+        }
+
+        wp_send_json_success( $result );
+    }
+
+    /**
+     * Handle AJAX request to sync price and stock for a batch of products to Trendyol.
+     *
+     * Accepts a JSON-encoded array of product IDs in $_POST['product_ids'].
+     * Returns per-product results and the batchRequestId for polling.
+     *
+     * Action: wp_ajax_trendyol_bulk_sync_price_stock_batch
+     *
+     * @since 1.0.0
+     */
+    public function ajax_bulk_sync_price_stock_batch(): void {
+        check_ajax_referer( 'woo_trendyol_admin', 'nonce' );
+
+        if ( ! current_user_can( 'manage_woocommerce' ) ) {
+            wp_send_json_error( [ 'message' => __( 'Permission denied.', 'woo-trendyol' ) ] );
+        }
+
+        $raw_ids = isset( $_POST['product_ids'] )
+            ? json_decode( sanitize_text_field( wp_unslash( $_POST['product_ids'] ) ), true )
+            : [];
+
+        if ( empty( $raw_ids ) || ! is_array( $raw_ids ) ) {
+            wp_send_json_error( [ 'message' => __( 'No product IDs provided.', 'woo-trendyol' ) ] );
+        }
+
+        $product_ids = array_map( 'absint', $raw_ids );
+        $result      = $this->product_creator->sync_price_and_stock( $product_ids );
 
         if ( is_wp_error( $result ) ) {
             wp_send_json_error( [ 'message' => $result->get_error_message() ] );
@@ -1461,6 +1908,157 @@ class Woo_Trendyol_Admin {
      *
      * @since 1.0.0
      */
+    public function ajax_load_all_mapped_attr_values(): void {
+        check_ajax_referer( 'woo_trendyol_admin', 'nonce' );
+
+        if ( ! current_user_can( 'manage_woocommerce' ) ) {
+            wp_send_json_error( [ 'message' => __( 'Permission denied.', 'woo-trendyol' ) ] );
+        }
+
+        $args = [
+            'taxonomy'   => 'product_cat',
+            'hide_empty' => false,
+            'meta_query' => [
+                [
+                    'key'     => 'trendyol_category_id',
+                    'compare' => 'EXISTS'
+                ]
+            ]
+        ];
+        $terms = get_terms( $args );
+
+        if ( is_wp_error( $terms ) || empty( $terms ) ) {
+            wp_send_json_error( [ 'message' => __( 'No categories are mapped to Trendyol yet. Please map categories first.', 'woo-trendyol' ) ] );
+        }
+
+        $attr_freq = []; 
+        $attr_data = []; 
+
+        foreach ( $terms as $term ) {
+            $required_attrs = get_term_meta( $term->term_id, '_trendyol_required_attributes', true );
+            if ( ! is_array( $required_attrs ) || empty( $required_attrs ) ) {
+                continue;
+            }
+
+            foreach ( $required_attrs as $attr ) {
+                $attr_id = (int) ( $attr['id'] ?? 0 );
+                if ( ! $attr_id ) {
+                    continue;
+                }
+
+                if ( ! isset( $attr_freq[ $attr_id ] ) ) {
+                    $attr_freq[ $attr_id ] = 0;
+                    $raw_name  = (string) ( $attr['name'] ?? '' );
+                    $is_custom = ! empty( $attr['allowCustom'] ) || (bool) preg_match( '/\b(web|free|custom|serbest)\b/i', $raw_name );
+
+                    $attr_data[ $attr_id ] = [
+                        'id'          => $attr_id,
+                        'name'        => $raw_name,
+                        'values'      => [],
+                        'allowCustom' => $is_custom,
+                        'categories'  => [],
+                        'cat_ids'     => [],
+                    ];
+                } else {
+                    if ( ! empty( $attr['allowCustom'] ) ) {
+                        $attr_data[ $attr_id ]['allowCustom'] = true;
+                    }
+                }
+
+                $attr_freq[ $attr_id ]++;
+                $attr_data[ $attr_id ]['categories'][] = $term->name;
+                $trendyol_cat_id = get_term_meta( $term->term_id, 'trendyol_category_id', true );
+                if ( $trendyol_cat_id ) {
+                    $attr_data[ $attr_id ]['cat_ids'][] = $trendyol_cat_id;
+                }
+
+                if ( ! empty( $attr['values'] ) ) {
+                    foreach ( $attr['values'] as $v ) {
+                        $v_id = (int) $v['id'];
+                        if ( ! isset( $attr_data[ $attr_id ]['values'][ $v_id ] ) ) {
+                            $attr_data[ $attr_id ]['values'][ $v_id ] = $v;
+                        }
+                    }
+                }
+            }
+        }
+
+        if ( empty( $attr_freq ) ) {
+            wp_send_json_error( [ 'message' => __( 'No cached category attributes found. Please run "Sync Category Attributes" from the Synchronization tab first.', 'woo-trendyol' ) ] );
+        }
+
+        $discovered_global_attrs = [];
+        $names_cache = get_option( 'trendyol_global_attr_names_cache', [] );
+        if ( ! is_array( $names_cache ) ) {
+            $names_cache = [];
+        }
+
+        $response_data = [ 'attributes' => [], 'saved_maps' => [] ];
+
+        foreach ( $attr_freq as $attr_id => $count ) {
+            if ( $count >= 2 ) {
+                $is_custom = ! empty( $attr_data[ $attr_id ]['allowCustom'] ) || (bool) preg_match( '/\b(web|free|custom|serbest)\b/i', (string) ( $attr_data[ $attr_id ]['name'] ?? '' ) );
+
+                // If not custom and values are empty, fetch from API
+                if ( ! $is_custom && empty( $attr_data[ $attr_id ]['values'] ) && ! empty( $attr_data[ $attr_id ]['cat_ids'] ) ) {
+                    $cat_id = reset( $attr_data[ $attr_id ]['cat_ids'] );
+                    $values_res = $this->api->get_attribute_values( (int) $cat_id, $attr_id );
+                    if ( ! is_wp_error( $values_res ) && ! empty( $values_res['content'] ) ) {
+                        foreach ( $values_res['content'] as $v ) {
+                            $v_id = (int) $v['attributeValueId'];
+                            $attr_data[ $attr_id ]['values'][ $v_id ] = [
+                                'id'   => $v_id,
+                                'name' => (string) $v['attributeValue'],
+                            ];
+                        }
+                    }
+                }
+
+                $values_list = array_values( $attr_data[ $attr_id ]['values'] );
+
+                // Sort by name
+                usort( $values_list, static fn( $a, $b ) => strcmp( $a['name'] ?? '', $b['name'] ?? '' ) );
+
+                $attr_data[ $attr_id ]['values'] = $values_list;
+                $attr_data[ $attr_id ]['categories'] = array_values( array_unique( $attr_data[ $attr_id ]['categories'] ) );
+                $discovered_global_attrs[] = $attr_data[ $attr_id ];
+
+                foreach ( $values_list as $v ) {
+                    $names_cache[ $v['id'] ] = $v['name'];
+                }
+
+                $wc_terms = $this->get_wc_terms_for_attr( get_option( 'trendyol_global_attr_' . $attr_id . '_wc', '' ) );
+
+                $saved_map = [];
+                $raw_map = get_option( 'trendyol_global_attr_' . $attr_id . '_map', '' );
+                if ( $raw_map ) {
+                    $decoded = json_decode( $raw_map, true );
+                    if ( is_array( $decoded ) ) {
+                        $saved_map = $decoded;
+                    }
+                }
+
+                $response_data['attributes'][ $attr_id ] = [
+                    'attr_id'     => $attr_id,
+                    'name'        => $attr_data[ $attr_id ]['name'],
+                    'values'      => $values_list,
+                    'wc_terms'    => $wc_terms,
+                    'allowCustom' => $attr_data[ $attr_id ]['allowCustom'],
+                ];
+                $response_data['saved_maps'][ $attr_id ] = $saved_map;
+            }
+        }
+
+        if ( empty( $discovered_global_attrs ) ) {
+            wp_send_json_error( [ 'message' => __( 'No global attributes found (i.e. no required attribute appears in 2 or more categories).', 'woo-trendyol' ) ] );
+        }
+
+        update_option( 'trendyol_discovered_global_attrs', $discovered_global_attrs, false );
+        update_option( 'trendyol_global_attr_names_cache', $names_cache, false );
+
+        wp_send_json_success( $response_data );
+    }
+
     public function ajax_load_attr_values(): void {
         check_ajax_referer( 'woo_trendyol_admin', 'nonce' );
 
@@ -1482,28 +2080,109 @@ class Woo_Trendyol_Admin {
         $category_attributes = $schema['categoryAttributes'] ?? [];
 
         // Canonical names we look for (multi-language).
-        $gender_names    = Woo_Trendyol_Attribute_Mapper::GLOBAL_ATTR_NAMES['gender'];
-        $age_names       = Woo_Trendyol_Attribute_Mapper::GLOBAL_ATTR_NAMES['age'];
+        $gender_names        = array_map( 'mb_strtolower', Woo_Trendyol_Attribute_Mapper::GLOBAL_ATTR_NAMES['gender'] );
+        $age_names           = array_map( 'mb_strtolower', Woo_Trendyol_Attribute_Mapper::GLOBAL_ATTR_NAMES['age'] );
+        $age_group_names     = array_map( 'mb_strtolower', Woo_Trendyol_Attribute_Mapper::GLOBAL_ATTR_NAMES['age_group'] );
+        $color_names         = array_map( 'mb_strtolower', Woo_Trendyol_Attribute_Mapper::GLOBAL_ATTR_NAMES['color'] );
 
-        $gender_data = [ 'attr_id' => 0, 'values' => [] ];
-        $age_data    = [ 'attr_id' => 0, 'values' => [] ];
+        $gender_data    = [ 'attr_id' => 0, 'values' => [] ];
+        $age_data       = [ 'attr_id' => 0, 'values' => [] ];
+        $age_group_data = [ 'attr_id' => 0, 'values' => [] ];
+        $color_data     = [ 'attr_id' => 0, 'values' => [], 'allowCustom' => false ];
+        $color_custom_data = [ 'attr_id' => 0, 'values' => [], 'allowCustom' => true ];
 
         foreach ( $category_attributes as $cat_attr ) {
-            $attr_name = (string) ( $cat_attr['attribute']['name'] ?? '' );
-            $attr_id   = (int)    ( $cat_attr['attribute']['id']   ?? 0 );
-            $raw_vals  = $cat_attr['attributeValues'] ?? [];
+            $attr_name    = (string) ( $cat_attr['attribute']['name'] ?? '' );
+            $attr_id      = (int)    ( $cat_attr['attribute']['id']   ?? 0 );
+            $raw_vals     = $cat_attr['attributeValues'] ?? [];
+            $allow_custom = ! empty( $cat_attr['allowCustom'] );
 
             $values = array_map(
                 static fn( $v ) => [ 'id' => (int) $v['id'], 'name' => (string) $v['name'] ],
                 $raw_vals
             );
 
-            if ( in_array( $attr_name, $gender_names, true ) ) {
-                $gender_data = [ 'attr_id' => $attr_id, 'values' => $values ];
-            } elseif ( in_array( $attr_name, $age_names, true ) ) {
-                $age_data = [ 'attr_id' => $attr_id, 'values' => $values ];
+            // If the attribute has no predefined values returned inline, try fetching them from the sub-endpoint
+            if ( empty( $values ) ) {
+                $values_res = $this->api->get_attribute_values( $category_id, $attr_id );
+                if ( ! is_wp_error( $values_res ) && ! empty( $values_res['content'] ) ) {
+                    foreach ( $values_res['content'] as $v ) {
+                        $values[] = [
+                            'id'   => (int) $v['attributeValueId'],
+                            'name' => (string) $v['attributeValue'],
+                        ];
+                    }
+                }
+            }
+
+            $attr_name_lower = mb_strtolower( trim( $attr_name ) );
+
+            $matched_slot = null;
+            foreach ( $gender_names as $k ) {
+                if ( false !== mb_strpos( $attr_name_lower, $k ) ) {
+                    $matched_slot = 'gender';
+                    break;
+                }
+            }
+            if ( ! $matched_slot ) {
+                foreach ( $age_group_names as $k ) {
+                    if ( false !== mb_strpos( $attr_name_lower, $k ) ) {
+                        $matched_slot = 'age_group';
+                        break;
+                    }
+                }
+            }
+            if ( ! $matched_slot ) {
+                foreach ( $age_names as $k ) {
+                    if ( false !== mb_strpos( $attr_name_lower, $k ) ) {
+                        $matched_slot = 'age';
+                        break;
+                    }
+                }
+            }
+            if ( ! $matched_slot ) {
+                foreach ( $color_names as $k ) {
+                    if ( false !== mb_strpos( $attr_name_lower, $k ) ) {
+                        $matched_slot = 'color';
+                        break;
+                    }
+                }
+            }
+
+            if ( 'gender' === $matched_slot ) {
+                if ( empty( $gender_data['values'] ) || ! empty( $values ) ) {
+                    $gender_data = [ 'attr_id' => $attr_id, 'values' => $values ];
+                }
+            } elseif ( 'age' === $matched_slot ) {
+                if ( empty( $age_data['values'] ) || ! empty( $values ) ) {
+                    $age_data = [ 'attr_id' => $attr_id, 'values' => $values ];
+                }
+            } elseif ( 'age_group' === $matched_slot ) {
+                if ( empty( $age_group_data['values'] ) || ! empty( $values ) ) {
+                    $age_group_data = [ 'attr_id' => $attr_id, 'values' => $values ];
+                }
+            } elseif ( 'color' === $matched_slot ) {
+                if ( $allow_custom ) {
+                    $color_custom_data = [ 'attr_id' => $attr_id, 'values' => $values, 'allowCustom' => true ];
+                } else {
+                    $color_data = [ 'attr_id' => $attr_id, 'values' => $values, 'allowCustom' => false ];
+                }
             }
         }
+
+        // Cache the loaded attribute value names so they can be shown on page reload.
+        $names_cache = get_option( 'trendyol_global_attr_names_cache', [] );
+        if ( ! is_array( $names_cache ) ) {
+            $names_cache = [];
+        }
+        foreach ( [ $gender_data, $age_data, $age_group_data, $color_data, $color_custom_data ] as $slot_data ) {
+            if ( ! empty( $slot_data['values'] ) ) {
+                foreach ( $slot_data['values'] as $v ) {
+                    $names_cache[ $v['id'] ] = $v['name'];
+                }
+            }
+        }
+        update_option( 'trendyol_global_attr_names_cache', $names_cache, false );
 
         // Load WC terms for the currently selected WC attributes.
         $gender_data['wc_terms'] = $this->get_wc_terms_for_attr(
@@ -1511,6 +2190,12 @@ class Woo_Trendyol_Admin {
         );
         $age_data['wc_terms'] = $this->get_wc_terms_for_attr(
             get_option( 'trendyol_global_attr_age_wc', '' )
+        );
+        $age_group_data['wc_terms'] = $this->get_wc_terms_for_attr(
+            get_option( 'trendyol_global_attr_age_group_wc', '' )
+        );
+        $color_data['wc_terms'] = $this->get_wc_terms_for_attr(
+            get_option( 'trendyol_global_attr_color_wc', '' )
         );
 
         // Load saved maps.
@@ -1532,12 +2217,34 @@ class Woo_Trendyol_Admin {
             }
         }
 
+        $saved_age_group_map = [];
+        $raw_ag = get_option( 'trendyol_global_attr_age_group_map', '' );
+        if ( $raw_ag ) {
+            $decoded = json_decode( $raw_ag, true );
+            if ( is_array( $decoded ) ) {
+                $saved_age_group_map = $decoded;
+            }
+        }
+
+        $saved_color_map = [];
+        $raw_c = get_option( 'trendyol_global_attr_color_map', '' );
+        if ( $raw_c ) {
+            $decoded = json_decode( $raw_c, true );
+            if ( is_array( $decoded ) ) {
+                $saved_color_map = $decoded;
+            }
+        }
+
         wp_send_json_success( [
             'gender'     => $gender_data,
             'age'        => $age_data,
+            'age_group'  => $age_group_data,
+            'color'      => $color_data,
             'saved_maps' => [
-                'gender' => $saved_gender_map,
-                'age'    => $saved_age_map,
+                'gender'    => $saved_gender_map,
+                'age'       => $saved_age_map,
+                'age_group' => $saved_age_group_map,
+                'color'     => $saved_color_map,
             ],
         ] );
     }
@@ -1563,7 +2270,7 @@ class Woo_Trendyol_Admin {
         $slot    = isset( $_POST['slot'] )    ? sanitize_key( $_POST['slot'] )                             : '';
         $wc_attr = isset( $_POST['wc_attr'] ) ? sanitize_text_field( wp_unslash( $_POST['wc_attr'] ) )    : '';
 
-        if ( ! in_array( $slot, [ 'gender', 'age' ], true ) || empty( $wc_attr ) ) {
+        if ( ! in_array( $slot, [ 'gender', 'age', 'age_group', 'color', 'color_custom' ], true ) || empty( $wc_attr ) ) {
             wp_send_json_error( [ 'message' => __( 'Invalid parameters.', 'woo-trendyol' ) ] );
         }
 
@@ -1661,9 +2368,10 @@ class Woo_Trendyol_Admin {
         }
 
         // --- Validate prerequisites ---
-        if ( empty( $product->get_sku() ) ) {
+        $barcode = $this->product_creator->resolve_barcode( $product );
+        if ( empty( $barcode ) ) {
             wp_send_json_error( [
-                'message' => __( 'Product has no SKU. Please add a SKU before sending to Trendyol.', 'woo-trendyol' ),
+                'message' => __( 'Product has no barcode. Please add a barcode before sending to Trendyol.', 'woo-trendyol' ),
             ] );
         }
 
@@ -1679,6 +2387,15 @@ class Woo_Trendyol_Admin {
 
         if ( is_wp_error( $push_result ) ) {
             wp_send_json_error( [ 'message' => $push_result->get_error_message() ] );
+        }
+
+        if ( ! empty( $push_result['errors'][ $post_id ] ) ) {
+            $error_msg = $push_result['errors'][ $post_id ];
+            update_post_meta( $post_id, '_trendyol_sync_status', 'error' );
+            update_post_meta( $post_id, '_trendyol_sync_error',  $error_msg );
+            update_post_meta( $post_id, '_trendyol_batch_id',    '' );
+            update_post_meta( $post_id, '_trendyol_last_sync',   time() );
+            wp_send_json_error( [ 'message' => $error_msg ] );
         }
 
         // Retrieve the batch ID stored by push_products().
@@ -1732,8 +2449,7 @@ class Woo_Trendyol_Admin {
         update_post_meta( $post_id, '_trendyol_last_sync', time() );
 
         // --- Fetch live Trendyol record to update approval flags ---
-        $sku              = $product->get_sku();
-        $trendyol_product = $this->api->get_product_base( $sku );
+        $trendyol_product = $this->api->get_product_base( $barcode );
 
         if ( ! is_wp_error( $trendyol_product ) ) {
             $approved    = $trendyol_product['approved']    ?? null;
@@ -1790,10 +2506,16 @@ class Woo_Trendyol_Admin {
             wp_send_json_error( [ 'message' => __( 'Permission denied.', 'woo-trendyol' ) ] );
         }
 
+        delete_transient( 'wt_category_tree' );
         $response = $this->api->get_categories();
 
         if ( is_wp_error( $response ) ) {
-            wp_send_json_error( [ 'message' => __( 'Failed to fetch Trendyol categories.', 'woo-trendyol' ) ] );
+            wp_send_json_error( [ 
+                'message' => sprintf( 
+                    __( 'Failed to fetch Trendyol categories: %s', 'woo-trendyol' ), 
+                    $response->get_error_message() 
+                ) 
+            ] );
         }
 
         $trendyol_categories = $response['categories'] ?? [];
@@ -1804,7 +2526,7 @@ class Woo_Trendyol_Admin {
             foreach ( $categories as $category ) {
                 $current_path = $path ? $path . ' ||| ' . $category['name'] : $category['name'];
                 if ( empty( $category['subCategories'] ) ) {
-                    $trendyol_leaf_cats[] = [
+                    $trendyol_leaf_cats[ $category['id'] ] = [
                         'id'   => $category['id'],
                         'name' => $category['name'],
                         'path' => $current_path,
@@ -1819,6 +2541,40 @@ class Woo_Trendyol_Admin {
 
         if ( empty( $trendyol_leaf_cats ) ) {
              wp_send_json_error( [ 'message' => __( 'No Trendyol categories found.', 'woo-trendyol' ) ] );
+        }
+
+        // Dynamically build and save the cascade and flat map files to keep the admin dropdowns
+        // in sync with the fetched category language/tree.
+        $cascade = [];
+        $flat_map = [];
+
+        $build_cascade_and_flat_map = function ( $categories, $parent_key = '__root__', $path_array = [] ) use ( &$build_cascade_and_flat_map, &$cascade, &$flat_map ) {
+            foreach ( $categories as $cat ) {
+                $current_path_array = array_merge( $path_array, [ $cat['name'] ] );
+                $has_sub = ! empty( $cat['subCategories'] );
+                
+                $cascade[ $parent_key ][] = [
+                    'id'   => $has_sub ? null : (string) $cat['id'],
+                    'name' => $cat['name'],
+                ];
+
+                if ( ! $has_sub ) {
+                    $flat_map[ (string) $cat['id'] ] = $current_path_array;
+                } else {
+                    $next_key = implode( '|||', $current_path_array );
+                    $build_cascade_and_flat_map( $cat['subCategories'], $next_key, $current_path_array );
+                }
+            }
+        };
+
+        $build_cascade_and_flat_map( $trendyol_categories );
+
+        $cascade_file  = WOO_TRENDYOL_PATH . 'assets/data/trendyol_categories.json';
+        $flat_map_file = WOO_TRENDYOL_PATH . 'assets/data/trendyol_flat_map.json';
+
+        if ( ! empty( $cascade ) && ! empty( $flat_map ) ) {
+            @file_put_contents( $cascade_file, wp_json_encode( $cascade, JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT ) );
+            @file_put_contents( $flat_map_file, wp_json_encode( $flat_map, JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT ) );
         }
 
         $woo_categories = get_terms( [
@@ -1841,7 +2597,18 @@ class Woo_Trendyol_Admin {
         $matched_count = 0;
 
         foreach ( $woo_leaf_cats as $woo_cat ) {
+            $mapped_id = get_term_meta( $woo_cat->term_id, Woo_Trendyol_Category_Helper::TERM_META_ID, true );
+
+            // If already mapped, update path to Greek and skip matching
+            if ( ! empty( $mapped_id ) ) {
+                if ( isset( $trendyol_leaf_cats[ $mapped_id ] ) ) {
+                    update_term_meta( $woo_cat->term_id, Woo_Trendyol_Category_Helper::TERM_META_PATH, $trendyol_leaf_cats[ $mapped_id ]['path'] );
+                }
+                continue;
+            }
+
             $woo_name = mb_strtolower( $woo_cat->name );
+
             $best_match_id   = 0;
             $best_match_path = '';
             $best_score      = 0;
@@ -1857,7 +2624,7 @@ class Woo_Trendyol_Admin {
 
                 // Try fuzzy match
                 similar_text( $woo_name, $t_name, $percent );
-                if ( $percent > 85 && $percent > $best_score ) {
+                if ( $percent > 75 && $percent > $best_score ) {
                     $best_score      = $percent;
                     $best_match_id   = $t_cat['id'];
                     $best_match_path = $t_cat['path'];
@@ -1911,18 +2678,35 @@ class Woo_Trendyol_Admin {
                 continue;
             }
 
+            delete_transient( 'wt_cat_attrs_' . $trendyol_id );
             $response = $this->api->get_category_attributes( (int) $trendyol_id );
 
             if ( ! is_wp_error( $response ) && ! empty( $response['categoryAttributes'] ) ) {
-                $required_attrs = [];
-                foreach ( $response['categoryAttributes'] as $attr ) {
-                    if ( ! empty( $attr['required'] ) ) {
-                        $required_attrs[] = [
-                            'id'   => $attr['attribute']['id'] ?? 0,
-                            'name' => $attr['attribute']['name'] ?? '',
-                        ];
-                    }
-                }
+                 $required_attrs = [];
+                 foreach ( $response['categoryAttributes'] as $attr ) {
+                     if ( ! empty( $attr['required'] ) ) {
+                         $attr_id = $attr['attribute']['id'] ?? 0;
+                         
+                         delete_transient( 'wt_attr_values_' . $trendyol_id . '_' . $attr_id );
+                         $values_res = $this->api->get_attribute_values( (int) $trendyol_id, $attr_id );
+                         $values = [];
+                         if ( ! is_wp_error( $values_res ) && ! empty( $values_res['content'] ) ) {
+                             foreach ( $values_res['content'] as $v ) {
+                                 $values[] = [
+                                     'id'   => (int) $v['attributeValueId'],
+                                     'name' => (string) $v['attributeValue'],
+                                 ];
+                             }
+                         }
+
+                         $required_attrs[] = [
+                             'id'          => $attr_id,
+                             'name'        => $attr['attribute']['name'] ?? '',
+                             'values'      => $values,
+                             'allowCustom' => ! empty( $attr['allowCustom'] ),
+                         ];
+                     }
+                 }
 
                 update_term_meta( $cat->term_id, '_trendyol_required_attributes', $required_attrs );
                 $synced_count++;
@@ -1963,6 +2747,7 @@ class Woo_Trendyol_Admin {
              $trendyol_id = get_term_meta( $cat->term_id, Woo_Trendyol_Category_Helper::TERM_META_ID, true );
              if ( $trendyol_id ) {
                  // Trigger caching via API client
+                 delete_transient( 'wt_cat_attrs_' . $trendyol_id );
                  $this->api->get_category_attributes( (int) $trendyol_id );
                  $synced_count++;
              }
@@ -1974,6 +2759,249 @@ class Woo_Trendyol_Admin {
                 $synced_count
             )
         ] );
+    }
+
+    /**
+     * AJAX handler to sync attributes for a single category when modified or requested on category edit screen.
+     *
+     * @since 1.0.0
+     */
+    public function ajax_sync_single_category_attributes(): void {
+        check_ajax_referer( 'woo_trendyol_taxonomy_save', 'nonce' );
+
+        if ( ! current_user_can( 'manage_woocommerce' ) ) {
+            wp_send_json_error( [ 'message' => __( 'Permission denied.', 'woo-trendyol' ) ] );
+        }
+
+        $category_id = isset( $_POST['category_id'] ) ? absint( $_POST['category_id'] ) : 0;
+        $term_id     = isset( $_POST['term_id'] ) ? absint( $_POST['term_id'] ) : 0;
+
+        if ( ! $category_id ) {
+            wp_send_json_error( [ 'message' => __( 'Invalid Trendyol category ID.', 'woo-trendyol' ) ] );
+        }
+
+        // Delete the transient to force fetching fresh Greek translation from API
+        delete_transient( 'wt_cat_attrs_' . $category_id );
+
+        $response = $this->api->get_category_attributes( $category_id );
+
+        if ( is_wp_error( $response ) ) {
+            wp_send_json_error( [ 'message' => $response->get_error_message() ] );
+        }
+
+        $required_attrs = [];
+        if ( ! empty( $response['categoryAttributes'] ) ) {
+            foreach ( $response['categoryAttributes'] as $attr ) {
+                if ( ! empty( $attr['required'] ) ) {
+                    $attr_id = $attr['attribute']['id'] ?? 0;
+                    
+                    delete_transient( 'wt_attr_values_' . $category_id . '_' . $attr_id );
+                    $values_res = $this->api->get_attribute_values( (int) $category_id, $attr_id );
+                    $values = [];
+                    if ( ! is_wp_error( $values_res ) && ! empty( $values_res['content'] ) ) {
+                        foreach ( $values_res['content'] as $v ) {
+                            $values[] = [
+                                'id'   => (int) $v['attributeValueId'],
+                                'name' => (string) $v['attributeValue'],
+                            ];
+                        }
+                    }
+
+                    $required_attrs[] = [
+                        'id'          => $attr_id,
+                        'name'        => $attr['attribute']['name'] ?? '',
+                        'values'      => $values,
+                        'allowCustom' => ! empty( $attr['allowCustom'] ),
+                    ];
+                }
+            }
+        }
+
+        // Save to term meta if term_id is valid (e.g. they are on edit page of an existing term)
+        if ( $term_id ) {
+            update_term_meta( $term_id, '_trendyol_required_attributes', $required_attrs );
+        }
+
+        // Prepare variables for rendering the partial block
+        $required_attributes      = $required_attrs;
+        $attribute_mappings       = $term_id ? get_term_meta( $term_id, '_trendyol_attribute_mappings', true ) : [];
+        $attribute_mappings       = is_array( $attribute_mappings ) ? $attribute_mappings : [];
+        $attribute_value_mappings = $term_id ? get_term_meta( $term_id, '_trendyol_attribute_value_mappings', true ) : [];
+        $attribute_value_mappings = is_array( $attribute_value_mappings ) ? $attribute_value_mappings : [];
+        $woo_attributes           = wc_get_attribute_taxonomies();
+
+        // Capture HTML representation of required attributes mapping block
+        ob_start();
+        if ( ! empty( $required_attributes ) ) {
+            ?>
+            <div class="wt-taxonomy-attributes-box" style="margin-top: 20px;" data-required-attributes="<?php echo esc_attr( wp_json_encode( $required_attributes ) ); ?>" data-value-mappings="<?php echo esc_attr( wp_json_encode( $attribute_value_mappings ) ); ?>">
+                <hr>
+                <h4><?php esc_html_e( 'Required Trendyol Attributes', 'woo-trendyol' ); ?></h4>
+                <p class="description">
+                    <?php esc_html_e( 'Map the required Trendyol attributes to your WooCommerce product attributes. Global mappings (like Gender and Age) are applied automatically if set up in the main settings.', 'woo-trendyol' ); ?>
+                </p>
+                <table class="form-table">
+                     <?php foreach ( $required_attributes as $attr ) : 
+                        $attr_id = $attr['id'];
+                        $attr_name = $attr['name'];
+                        $current_mapping = $attribute_mappings[ $attr_id ] ?? '';
+
+                        $slot = null;
+                        $attr_name_lower = mb_strtolower( trim( $attr_name ) );
+                        foreach ( Woo_Trendyol_Attribute_Mapper::GLOBAL_ATTR_KEYWORDS as $s => $keywords ) {
+                            foreach ( $keywords as $keyword ) {
+                                if ( mb_stripos( $attr_name_lower, $keyword ) !== false ) {
+                                    $slot = $s;
+                                    break 2;
+                                }
+                            }
+                        }
+
+                        $is_globally_mapped = false;
+                        $global_wc_attr = '';
+                        if ( $slot && in_array( $slot, [ 'gender', 'age', 'age_group', 'color' ], true ) ) {
+                            $global_wc_attr = get_option( 'trendyol_global_attr_' . $slot . '_wc', '' );
+                            if ( ! empty( $global_wc_attr ) ) {
+                                $is_globally_mapped = true;
+                            }
+                        }
+                    ?>
+                        <tr>
+                            <th scope="row">
+                                <label for="trendyol_attr_<?php echo esc_attr( $attr_id ); ?>">
+                                    <?php echo esc_html( $attr_name ); ?>
+                                </label>
+                            </th>
+                            <td>
+                                <div style="display: flex; flex-direction: column; align-items: flex-start; gap: 8px;">
+                                    <select name="trendyol_attribute_mappings[<?php echo esc_attr( $attr_id ); ?>]" id="trendyol_attr_<?php echo esc_attr( $attr_id ); ?>" style="width: 100%; max-width: 400px; min-width: 250px;">
+                                        <option value=""><?php esc_html_e( '-- Select WooCommerce Attribute --', 'woo-trendyol' ); ?></option>
+                                        <?php foreach ( $woo_attributes as $woo_attr ) : ?>
+                                            <option value="<?php echo esc_attr( 'pa_' . $woo_attr->attribute_name ); ?>" <?php selected( $current_mapping, 'pa_' . $woo_attr->attribute_name ); ?>>
+                                                <?php echo esc_html( $woo_attr->attribute_label ); ?>
+                                            </option>
+                                        <?php endforeach; ?>
+                                    </select>
+
+                                    <?php if ( $is_globally_mapped ) : ?>
+                                        <div class="wt-global-mapping-notice" style="font-size: 11px; color: #46b450; padding: 4px 8px; background: #ecf7ed; border-left: 4px solid #46b450; display: block; width: 100%; max-width: 400px; box-sizing: border-box;">
+                                            <?php printf( 
+                                                esc_html__( 'Mapped globally to "%s". Select an attribute here only to override global mapping.', 'woo-trendyol' ),
+                                                esc_html( $global_wc_attr )
+                                            ); ?>
+                                        </div>
+                                    <?php endif; ?>
+                                </div>
+
+                                <?php 
+                                if ( ! empty( $current_mapping ) && taxonomy_exists( $current_mapping ) ) :
+                                    $woo_terms = get_terms( [ 'taxonomy' => $current_mapping, 'hide_empty' => false ] );
+                                    if ( ! is_wp_error( $woo_terms ) && ! empty( $woo_terms ) ) :
+                                        if ( ! empty( $attr['values'] ) ) :
+                                ?>
+                                    <div class="wt-value-mappings" style="margin-top: 10px; padding: 10px; background: #f9f9f9; border: 1px solid #ddd; max-height: 250px; overflow-y: auto;">
+                                        <strong><?php esc_html_e( 'Map Values:', 'woo-trendyol' ); ?></strong>
+                                        <table style="width: 100%; border-collapse: collapse; margin-top: 5px;">
+                                            <?php foreach ( $woo_terms as $woo_term ) : 
+                                                $saved_ty_val = $attribute_value_mappings[ $attr_id ][ $woo_term->slug ] ?? '';
+                                                
+                                                // Automap by exact/case-insensitive name matching if no saved mapping exists
+                                                if ( empty( $saved_ty_val ) ) {
+                                                    $term_name_lower = mb_strtolower( trim( $woo_term->name ) );
+                                                    foreach ( $attr['values'] as $ty_val ) {
+                                                        if ( mb_strtolower( trim( $ty_val['name'] ) ) === $term_name_lower ) {
+                                                            $saved_ty_val = $ty_val['id'];
+                                                            break;
+                                                        }
+                                                    }
+                                                }
+                                            ?>
+                                                <tr style="border-bottom: 1px solid #eee;">
+                                                    <td style="padding: 5px 0; font-size: 12px;"><?php echo esc_html( $woo_term->name ); ?></td>
+                                                    <td style="padding: 5px 0; text-align: right;">
+                                                        <select name="trendyol_attribute_value_mappings[<?php echo esc_attr( $attr_id ); ?>][<?php echo esc_attr( $woo_term->slug ); ?>]" style="font-size: 12px; min-width: 250px; max-width: 100%;">
+                                                            <option value=""><?php esc_html_e( '-- Select Trendyol Value --', 'woo-trendyol' ); ?></option>
+                                                            <?php foreach ( $attr['values'] as $ty_val ) : ?>
+                                                                <option value="<?php echo esc_attr( $ty_val['id'] ); ?>" <?php selected( $saved_ty_val, $ty_val['id'] ); ?>>
+                                                                    <?php echo esc_html( $ty_val['name'] ); ?>
+                                                                </option>
+                                                            <?php endforeach; ?>
+                                                        </select>
+                                                    </td>
+                                                </tr>
+                                            <?php endforeach; ?>
+                                        </table>
+                                    </div>
+                                <?php 
+                                        elseif ( ! empty( $attr['allowCustom'] ) ) :
+                                ?>
+                                    <div class="wt-custom-values-notice" style="margin-top: 10px; padding: 8px 12px; background: #f0f6fb; border-left: 4px solid #11a0d2; font-size: 11px; color: #50575e;">
+                                        <?php esc_html_e( 'This attribute allows custom values. Individual value mapping is not required; your WooCommerce term names will be sent directly.', 'woo-trendyol' ); ?>
+                                    </div>
+                                <?php
+                                        endif;
+                                    endif;
+                                endif; 
+                                ?>
+                            </td>
+                        </tr>
+                    <?php endforeach; ?>
+                </table>
+            </div>
+            <?php
+        } else {
+            ?>
+            <div class="wt-taxonomy-attributes-box" style="margin-top: 20px;">
+                <hr>
+                <h4><?php esc_html_e( 'Required Trendyol Attributes', 'woo-trendyol' ); ?></h4>
+                <p class="description" style="color: #666; font-style: italic;">
+                    <?php esc_html_e( 'No required attributes are defined by Trendyol for this category.', 'woo-trendyol' ); ?>
+                </p>
+            </div>
+            <?php
+        }
+        $html = ob_get_clean();
+
+        wp_send_json_success( [
+            'html'    => $html,
+            'message' => __( 'Attributes synchronized successfully for this category.', 'woo-trendyol' ),
+        ] );
+    }
+
+    /**
+     * AJAX handler to fetch WooCommerce terms for an attribute.
+     *
+     * @since 1.0.0
+     */
+    public function ajax_get_wc_attribute_terms(): void {
+        check_ajax_referer( 'woo_trendyol_taxonomy_save', 'nonce' );
+
+        if ( ! current_user_can( 'manage_woocommerce' ) ) {
+            wp_send_json_error( [ 'message' => __( 'Permission denied.', 'woo-trendyol' ) ] );
+        }
+
+        $wc_attr = isset( $_POST['wc_attr'] ) ? sanitize_text_field( wp_unslash( $_POST['wc_attr'] ) ) : '';
+
+        if ( empty( $wc_attr ) || ! taxonomy_exists( $wc_attr ) ) {
+            wp_send_json_error( [ 'message' => __( 'Invalid attribute.', 'woo-trendyol' ) ] );
+        }
+
+        $terms = get_terms( [
+            'taxonomy'   => $wc_attr,
+            'hide_empty' => false,
+        ] );
+
+        $result = [];
+        if ( ! is_wp_error( $terms ) ) {
+            foreach ( $terms as $term ) {
+                $result[] = [
+                    'slug' => $term->slug,
+                    'name' => $term->name,
+                ];
+            }
+        }
+
+        wp_send_json_success( [ 'terms' => $result ] );
     }
 
     // -----------------------------------------------------------------------
@@ -2040,4 +3068,171 @@ class Woo_Trendyol_Admin {
         // WC < 7.1: HPOS did not exist, so legacy CPT storage is always in use.
         return false;
     }
+
+    /**
+     * Register the Trendyol Order Details metabox on WooCommerce Order edit page.
+     *
+     * @since 1.0.0
+     */
+    public function register_order_meta_box(): void {
+        $screens = [ 'shop_order', 'woocommerce_page_wc-orders' ];
+        foreach ( $screens as $screen ) {
+            add_meta_box(
+                'woo-trendyol-order-details',
+                __( 'Trendyol Order Details', 'woo-trendyol' ),
+                [ $this, 'render_order_meta_box' ],
+                $screen,
+                'side',
+                'default'
+            );
+        }
+    }
+
+    /**
+     * Render the Trendyol Order Details metabox.
+     *
+     * @since 1.0.0
+     * @param WP_Post|object $post_or_object The post or order object.
+     */
+    public function render_order_meta_box( $post_or_object ): void {
+        $order_id = 0;
+        if ( is_numeric( $post_or_object ) ) {
+            $order_id = (int) $post_or_object;
+        } elseif ( $post_or_object instanceof WP_Post ) {
+            $order_id = $post_or_object->ID;
+        } elseif ( is_a( $post_or_object, 'WP_Screen' ) ) {
+            return;
+        } elseif ( method_exists( $post_or_object, 'get_id' ) ) {
+            $order_id = $post_or_object->get_id();
+        }
+
+        if ( ! $order_id ) {
+            return;
+        }
+
+        $order = wc_get_order( $order_id );
+        if ( ! $order instanceof WC_Order ) {
+            return;
+        }
+
+        $package_id = $order->get_meta( '_trendyol_package_id', true );
+        if ( empty( $package_id ) ) {
+            echo '<p>' . esc_html__( 'Not a Trendyol order.', 'woo-trendyol' ) . '</p>';
+            return;
+        }
+
+        $order_number   = $order->get_meta( '_trendyol_order_number', true );
+        $tracking_number= $order->get_meta( '_trendyol_cargo_tracking_number', true );
+        $cargo_provider = $order->get_meta( '_trendyol_cargo_provider', true );
+
+        // Query the live package status from Trendyol
+        $live_status = __( 'Unknown', 'woo-trendyol' );
+        $pkg_res     = $this->api->get_shipment_package( (string) $package_id );
+        if ( ! is_wp_error( $pkg_res ) && ! empty( $pkg_res['content'] ) ) {
+            $live_status = (string) ( $pkg_res['content'][0]['status'] ?? 'Unknown' );
+        }
+
+        // Output UI HTML
+        ?>
+        <div class="wt-order-metabox-wrapper" style="padding: 5px 0;">
+            <p style="margin: 6px 0;">
+                <strong><?php esc_html_e( 'Order Number:', 'woo-trendyol' ); ?></strong>
+                <code style="float: right;"><?php echo esc_html( $order_number ); ?></code>
+            </p>
+            <p style="margin: 6px 0;">
+                <strong><?php esc_html_e( 'Package ID:', 'woo-trendyol' ); ?></strong>
+                <code style="float: right;"><?php echo esc_html( $package_id ); ?></code>
+            </p>
+            <p style="margin: 6px 0;">
+                <strong><?php esc_html_e( 'Cargo Carrier:', 'woo-trendyol' ); ?></strong>
+                <span style="float: right;"><?php echo esc_html( $cargo_provider ?: 'ACS' ); ?></span>
+            </p>
+            <p style="margin: 6px 0;">
+                <strong><?php esc_html_e( 'Tracking Number:', 'woo-trendyol' ); ?></strong>
+                <code style="float: right;"><?php echo esc_html( $tracking_number ); ?></code>
+            </p>
+            <p style="border-top: 1px solid #eee; padding-top: 10px; margin-top: 10px; margin-bottom: 6px;">
+                <strong><?php esc_html_e( 'Live Status:', 'woo-trendyol' ); ?></strong>
+                <span style="float: right; font-weight: bold; color: #11a0d2;"><?php echo esc_html( $live_status ); ?></span>
+            </p>
+
+            <?php if ( ! empty( $tracking_number ) ) : ?>
+                <div style="margin-top: 15px; text-align: center;">
+                    <a href="<?php echo esc_url( admin_url( 'admin-ajax.php?action=trendyol_get_shipping_label&order_id=' . $order_id . '&nonce=' . wp_create_nonce( 'trendyol_shipping_label_' . $order_id ) ) ); ?>" 
+                       target="_blank" 
+                       class="button button-primary" 
+                       style="width: 100%; display: block; text-align: center;">
+                        <?php esc_html_e( 'Download Shipping Label', 'woo-trendyol' ); ?>
+                    </a>
+                </div>
+            <?php endif; ?>
+        </div>
+        <?php
+    }
+
+    /**
+     * Handle AJAX request to download a shipping label from Trendyol.
+     *
+     * @since 1.0.0
+     */
+    public function ajax_get_shipping_label(): void {
+        $order_id = isset( $_GET['order_id'] ) ? absint( $_GET['order_id'] ) : 0;
+        if ( ! $order_id ) {
+            wp_die( esc_html__( 'Invalid order ID.', 'woo-trendyol' ) );
+        }
+
+        $nonce = isset( $_GET['nonce'] ) ? sanitize_text_field( wp_unslash( $_GET['nonce'] ) ) : '';
+        if ( ! wp_verify_nonce( $nonce, 'trendyol_shipping_label_' . $order_id ) ) {
+            wp_die( esc_html__( 'Security check failed.', 'woo-trendyol' ) );
+        }
+
+        if ( ! current_user_can( 'manage_woocommerce' ) ) {
+            wp_die( esc_html__( 'Permission denied.', 'woo-trendyol' ) );
+        }
+
+        $order = wc_get_order( $order_id );
+        if ( ! $order instanceof WC_Order ) {
+            wp_die( esc_html__( 'Order not found.', 'woo-trendyol' ) );
+        }
+
+        $tracking_number = $order->get_meta( '_trendyol_cargo_tracking_number', true );
+        if ( empty( $tracking_number ) ) {
+            wp_die( esc_html__( 'Tracking number not found for this order.', 'woo-trendyol' ) );
+        }
+
+        $response = $this->api->get_common_label( $tracking_number );
+        if ( is_wp_error( $response ) ) {
+            wp_die( sprintf( esc_html__( 'Failed to fetch label: %s', 'woo-trendyol' ), $response->get_error_message() ) );
+        }
+
+        $label_data = null;
+        if ( isset( $response['data'] ) && is_array( $response['data'] ) && ! empty( $response['data'] ) ) {
+            $label_data = $response['data'][0];
+        } elseif ( is_array( $response ) && ! empty( $response ) ) {
+            $label_data = $response[0];
+        }
+
+        if ( ! $label_data ) {
+            wp_die( esc_html__( 'Label data not found in response.', 'woo-trendyol' ) );
+        }
+
+        $format = strtoupper( (string) ( $label_data['format'] ?? 'PDF' ) );
+        $label  = (string) ( $label_data['label'] ?? '' );
+
+        if ( empty( $label ) ) {
+            wp_die( esc_html__( 'Label content is empty.', 'woo-trendyol' ) );
+        }
+
+        if ( 'ZPL' === $format ) {
+            header( 'Content-Type: text/plain' );
+            header( 'Content-Disposition: attachment; filename="shipping-label-' . $tracking_number . '.zpl"' );
+            echo $label;
+        } else {
+            header( 'Content-Type: application/pdf' );
+            header( 'Content-Disposition: inline; filename="shipping-label-' . $tracking_number . '.pdf"' );
+            echo base64_decode( $label );
+        }
+        exit;
+    }
+
 }

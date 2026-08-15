@@ -138,7 +138,14 @@ class Woo_Trendyol_Product_Creator {
      *                        - batches    (array) — per-batch batchRequestId list
      *                        - errors     (array) — per-product error messages
      */
-    public function push_products( array $product_ids ): array|WP_Error {
+    /**
+     * Push one or more products to Trendyol (routing to create or update as needed).
+     *
+     * @since 1.0.0
+     * @param array $product_ids Array of WooCommerce product IDs to push.
+     * @return array|WP_Error Combined push result details, or WP_Error.
+     */
+    public function push_products( array $product_ids, bool $is_bulk = false ): array|WP_Error {
         if ( ! $this->api->is_active() ) {
             return new WP_Error(
                 'trendyol_inactive',
@@ -146,6 +153,179 @@ class Woo_Trendyol_Product_Creator {
             );
         }
 
+        $to_create = [];
+        $to_update = [];
+        foreach ( $product_ids as $pid ) {
+            if ( 'yes' === get_post_meta( $pid, '_trendyol_sent', true ) ) {
+                $to_update[] = $pid;
+            } else {
+                $to_create[] = $pid;
+            }
+        }
+
+        $result = [
+            'submitted' => 0,
+            'skipped'   => 0,
+            'batches'   => [],
+            'errors'    => [],
+        ];
+
+        if ( ! empty( $to_create ) ) {
+            $create_res = $this->create_products_batch( $to_create, $is_bulk );
+            if ( ! is_wp_error( $create_res ) ) {
+                $result['submitted'] += $create_res['submitted'];
+                $result['skipped']   += $create_res['skipped'];
+                $result['batches']    = array_merge( $result['batches'], $create_res['batches'] );
+                $result['errors']    = $result['errors'] + $create_res['errors'];
+            } else {
+                return $create_res;
+            }
+        }
+
+        if ( ! empty( $to_update ) ) {
+            $update_res = $this->update_products( $to_update, $is_bulk );
+            if ( ! is_wp_error( $update_res ) ) {
+                $result['submitted'] += $update_res['submitted'];
+                $result['skipped']   += $update_res['skipped'];
+                $result['batches']    = array_merge( $result['batches'], $update_res['batches'] );
+                $result['errors']    = $result['errors'] + $update_res['errors'];
+            } else {
+                return $update_res;
+            }
+        }
+
+        return $result;
+    }
+
+    /**
+     * Check if a product has all required mappings (category, brand, attributes).
+     *
+     * @since 1.0.0
+     * @param WC_Product $product The WooCommerce product.
+     * @return bool True if mapped, false otherwise.
+     */
+    public function validate_mapping( WC_Product $product ): bool {
+        $product_id = $product->get_id();
+
+        // Check category mapping
+        $category_id = (int) $this->category_helper->get_trendyol_category_id( $product_id );
+        if ( ! $category_id ) {
+            return false;
+        }
+
+        // Check brand mapping
+        $brand_id = $this->resolve_brand_id( $product );
+        if ( ! $brand_id ) {
+            return false;
+        }
+
+        // Check required attributes
+        $terms   = get_the_terms( $product_id, 'product_cat' );
+        $term_id = 0;
+        if ( $terms && ! is_wp_error( $terms ) ) {
+            foreach ( $terms as $term ) {
+                if ( get_term_meta( $term->term_id, 'trendyol_category_id', true ) ) {
+                    $term_id = $term->term_id;
+                    break;
+                }
+            }
+            if ( ! $term_id ) {
+                $term_id = $terms[0]->term_id;
+            }
+        }
+
+        $attributes = $this->attribute_mapper->build_attributes( $product, $category_id, $term_id );
+        if ( is_wp_error( $attributes ) ) {
+            return false;
+        }
+
+        return true;
+    }
+
+    /**
+     * Synchronize price and stock for a batch of products.
+     *
+     * @since 1.0.0
+     * @param array $product_ids Array of WooCommerce product IDs.
+     * @return array Result summary.
+     */
+    public function sync_price_and_stock( array $product_ids ): array {
+        $result = [
+            'submitted' => 0,
+            'skipped'   => 0,
+            'batches'   => [],
+            'errors'    => [],
+        ];
+
+        if ( ! $this->api->is_active() ) {
+            $result['errors'][0] = __( 'Trendyol integration is not active. Please enable it in settings.', 'woo-trendyol' );
+            return $result;
+        }
+
+        $price_stock_items = [];
+        $item_map = [];
+
+        foreach ( $product_ids as $product_id ) {
+            $product = wc_get_product( $product_id );
+            if ( ! $product ) {
+                $result['skipped']++;
+                $result['errors'][ $product_id ] = __( 'Product not found.', 'woo-trendyol' );
+                continue;
+            }
+
+            $barcode = $this->resolve_barcode( $product );
+            if ( empty( $barcode ) ) {
+                $result['skipped']++;
+                $result['errors'][ $product_id ] = __( 'Product has no barcode.', 'woo-trendyol' );
+                continue;
+            }
+
+            $payload = $this->build_payload( $product, true );
+            if ( is_wp_error( $payload ) ) {
+                $result['skipped']++;
+                $result['errors'][ $product_id ] = $payload->get_error_message();
+                continue;
+            }
+
+            $price_stock_items[] = [
+                'barcode'   => $barcode,
+                'quantity'  => $payload['quantity'],
+                'salePrice' => $payload['salePrice'],
+                'listPrice' => $payload['listPrice'],
+            ];
+            $item_map[] = $product_id;
+        }
+
+        if ( ! empty( $price_stock_items ) ) {
+            $response = $this->api->update_price_and_stock( $price_stock_items );
+            if ( is_wp_error( $response ) ) {
+                $error_msg = $response->get_error_message();
+                foreach ( $item_map as $pid ) {
+                    $result['errors'][ $pid ] = $error_msg;
+                    $result['skipped']++;
+                }
+            } else {
+                $batch_request_id = $response['batchRequestId'] ?? '';
+                if ( $batch_request_id ) {
+                    $result['batches'][] = $batch_request_id;
+                }
+                foreach ( $item_map as $pid ) {
+                    $result['submitted']++;
+                }
+            }
+        }
+
+        return $result;
+    }
+
+    /**
+     * Create one or more new products on Trendyol (batch).
+     *
+     * @since 1.0.0
+     * @param array $product_ids Array of WooCommerce product IDs.
+     * @return array Result summary.
+     */
+    private function create_products_batch( array $product_ids, bool $is_bulk = false ): array {
         $result = [
             'submitted' => 0,
             'skipped'   => 0,
@@ -166,7 +346,7 @@ class Woo_Trendyol_Product_Creator {
                 continue;
             }
 
-            $payload = $this->build_payload( $product );
+            $payload = $this->build_payload( $product, $is_bulk );
 
             if ( is_wp_error( $payload ) ) {
                 $result['skipped']++;
@@ -234,6 +414,166 @@ class Woo_Trendyol_Product_Creator {
     }
 
     /**
+     * Update one or more live products on Trendyol (content + inventory/price).
+     *
+     * @since 1.0.0
+     * @param array $product_ids Array of WooCommerce product IDs.
+     * @return array Result summary.
+     */
+    public function update_products( array $product_ids, bool $is_bulk = false ): array {
+        $result = [
+            'submitted' => 0,
+            'skipped'   => 0,
+            'batches'   => [],
+            'errors'    => [],
+        ];
+
+        $approved_items    = [];
+        $unapproved_items  = [];
+        $price_stock_items = [];
+        
+        $content_id_map    = [];
+        $barcode_map       = [];
+
+        foreach ( $product_ids as $product_id ) {
+            $product = wc_get_product( $product_id );
+            if ( ! $product ) {
+                $result['skipped']++;
+                $result['errors'][ $product_id ] = __( 'Product not found.', 'woo-trendyol' );
+                continue;
+            }
+
+            $barcode = $this->resolve_barcode( $product );
+            if ( empty( $barcode ) ) {
+                $result['skipped']++;
+                $result['errors'][ $product_id ] = __( 'Product has no barcode.', 'woo-trendyol' );
+                continue;
+            }
+
+            $trendyol_product = $this->api->get_product_base( $barcode );
+            if ( is_wp_error( $trendyol_product ) ) {
+                $result['skipped']++;
+                $result['errors'][ $product_id ] = sprintf( __( 'Could not find product on Trendyol: %s', 'woo-trendyol' ), $trendyol_product->get_error_message() );
+                continue;
+            }
+
+            $payload = $this->build_payload( $product, $is_bulk );
+            if ( is_wp_error( $payload ) ) {
+                $result['skipped']++;
+                $result['errors'][ $product_id ] = $payload->get_error_message();
+                continue;
+            }
+
+            $price_stock_items[] = [
+                'barcode'   => $barcode,
+                'quantity'  => $payload['quantity'],
+                'salePrice' => $payload['salePrice'],
+                'listPrice' => $payload['listPrice'],
+            ];
+
+            $content_id = $trendyol_product['contentId'] ?? 0;
+
+            if ( ! empty( $content_id ) ) {
+                $approved_items[] = [
+                    'contentId'   => $content_id,
+                    'title'       => $payload['title'],
+                    'description' => $payload['description'],
+                    'images'      => $payload['images'],
+                    'attributes'  => $payload['attributes'],
+                ];
+                $content_id_map[ $content_id ] = $product_id;
+            } else {
+                $unapproved_items[] = [
+                    'barcode'       => $barcode,
+                    'title'         => $payload['title'],
+                    'description'   => $payload['description'],
+                    'productMainId' => $payload['productMainId'] ?? '',
+                    'brandId'       => $payload['brandId'] ?? 0,
+                    'categoryId'    => $payload['categoryId'] ?? 0,
+                    'stockCode'     => $payload['stockCode'] ?? '',
+                    'vatRate'       => $payload['vatRate'] ?? 0,
+                    'images'        => $payload['images'],
+                    'attributes'    => $payload['attributes'],
+                ];
+                $barcode_map[ $barcode ] = $product_id;
+            }
+        }
+
+        if ( empty( $approved_items ) && empty( $unapproved_items ) ) {
+            return $result;
+        }
+
+        // 1. Submit Content Updates for Approved Products
+        if ( ! empty( $approved_items ) ) {
+            $response = $this->api->update_product_content( $approved_items );
+            if ( is_wp_error( $response ) ) {
+                $error_msg = $response->get_error_message();
+                foreach ( $approved_items as $item ) {
+                    $pid = $content_id_map[ $item['contentId'] ] ?? null;
+                    if ( $pid ) {
+                        $result['errors'][ $pid ] = $error_msg;
+                        $result['skipped']++;
+                        update_post_meta( $pid, '_trendyol_sync_status', 'error' );
+                        update_post_meta( $pid, '_trendyol_sync_error',  $error_msg );
+                    }
+                }
+            } else {
+                $batch_id = $response['batchRequestId'] ?? '';
+                $result['batches'][] = $batch_id;
+                foreach ( $approved_items as $item ) {
+                    $pid = $content_id_map[ $item['contentId'] ] ?? null;
+                    if ( $pid ) {
+                        update_post_meta( $pid, '_trendyol_sent',        'yes' );
+                        update_post_meta( $pid, '_trendyol_batch_id',    $batch_id );
+                        update_post_meta( $pid, '_trendyol_sync_status', 'pending' );
+                        update_post_meta( $pid, '_trendyol_sync_error',  '' );
+                        update_post_meta( $pid, '_trendyol_last_sync',   time() );
+                        $result['submitted']++;
+                    }
+                }
+            }
+        }
+
+        // 2. Submit Content Updates for Unapproved Products
+        if ( ! empty( $unapproved_items ) ) {
+            $response = $this->api->update_unapproved_product_content( $unapproved_items );
+            if ( is_wp_error( $response ) ) {
+                $error_msg = $response->get_error_message();
+                foreach ( $unapproved_items as $item ) {
+                    $pid = $barcode_map[ $item['barcode'] ] ?? null;
+                    if ( $pid ) {
+                        $result['errors'][ $pid ] = $error_msg;
+                        $result['skipped']++;
+                        update_post_meta( $pid, '_trendyol_sync_status', 'error' );
+                        update_post_meta( $pid, '_trendyol_sync_error',  $error_msg );
+                    }
+                }
+            } else {
+                $batch_id = $response['batchRequestId'] ?? '';
+                $result['batches'][] = $batch_id;
+                foreach ( $unapproved_items as $item ) {
+                    $pid = $barcode_map[ $item['barcode'] ] ?? null;
+                    if ( $pid ) {
+                        update_post_meta( $pid, '_trendyol_sent',        'yes' );
+                        update_post_meta( $pid, '_trendyol_batch_id',    $batch_id );
+                        update_post_meta( $pid, '_trendyol_sync_status', 'pending' );
+                        update_post_meta( $pid, '_trendyol_sync_error',  '' );
+                        update_post_meta( $pid, '_trendyol_last_sync',   time() );
+                        $result['submitted']++;
+                    }
+                }
+            }
+        }
+
+        // 3. Submit Price & Stock Updates (if any updates were submitted successfully)
+        if ( $result['submitted'] > 0 && ! empty( $price_stock_items ) ) {
+            $this->api->update_price_and_stock( $price_stock_items );
+        }
+
+        return $result;
+    }
+
+    /**
      * Resolve the barcode value for a product according to the configured source.
      *
      * Priority chain:
@@ -245,14 +585,12 @@ class Woo_Trendyol_Product_Creator {
      *  'sku'              — $product->get_sku() directly.
      *  'global_unique_id' — _global_unique_id post meta (WC GTIN/EAN/ISBN field, WC >= 9.2).
      *  'meta'             — custom post meta key stored in trendyol_barcode_meta_key option.
-     *  'attribute'        — WC product attribute slug stored in trendyol_barcode_attr_slug option.
-     *
-     * @since  1.0.0
-     * @access private
+     *  'attribute'        — WC product attribute slu     * @since  1.0.0
+     * @access public
      * @param  WC_Product $product The WooCommerce product.
      * @return string              The resolved barcode string, or empty string if not found.
      */
-    private function resolve_barcode( WC_Product $product ): string {
+    public function resolve_barcode( WC_Product $product ): string {
         $source     = (string) get_option( 'trendyol_barcode_source', 'sku' );
         $product_id = $product->get_id();
         $sku        = (string) $product->get_sku(); // Always available as fallback.
@@ -264,11 +602,35 @@ class Woo_Trendyol_Product_Creator {
              * Reads the _global_unique_id post meta introduced in WooCommerce 9.2.
              * This is the official GTIN / EAN / ISBN / UPC field shown in the
              * product edit screen under "Product data → General → GTIN, UPC, EAN...".
-             * Falls back to SKU when the meta is empty.
+             * Falls back to EAN attribute, and then SKU when the meta is empty.
              */
             case 'global_unique_id':
                 $gtin = (string) get_post_meta( $product_id, '_global_unique_id', true );
-                return ! empty( $gtin ) ? $gtin : $sku;
+                if ( ! empty( $gtin ) ) {
+                    return $gtin;
+                }
+
+                // Fallback to EAN attribute (taxonomy first)
+                if ( taxonomy_exists( 'pa_ean' ) ) {
+                    $terms = wp_get_post_terms( $product_id, 'pa_ean', [ 'fields' => 'names' ] );
+                    if ( ! is_wp_error( $terms ) && ! empty( $terms ) ) {
+                        return (string) $terms[0];
+                    }
+                } else {
+                    // Custom non-taxonomy product attribute
+                    $attributes = $product->get_attributes();
+                    foreach ( [ 'ean', 'EAN' ] as $ean_key ) {
+                        if ( isset( $attributes[ $ean_key ] ) ) {
+                            $attr  = $attributes[ $ean_key ];
+                            $value = is_object( $attr ) ? $attr->get_options() : (array) $attr;
+                            if ( ! empty( $value ) ) {
+                                return (string) $value[0];
+                            }
+                        }
+                    }
+                }
+
+                return $sku;
 
             /*
              * Mode: Custom post meta key
@@ -345,7 +707,7 @@ class Woo_Trendyol_Product_Creator {
      * @param WC_Product $product The WooCommerce product.
      * @return array|WP_Error Complete payload array or WP_Error if validation fails.
      */
-    public function build_payload( WC_Product $product ): array|WP_Error {
+    public function build_payload( WC_Product $product, bool $is_bulk = false ): array|WP_Error {
         $product_id = $product->get_id();
 
         // ---- Resolve barcode using the configured source ----
@@ -393,7 +755,6 @@ class Woo_Trendyol_Product_Creator {
 
         // ---- Prices ----
         $regular_price = (float) $product->get_regular_price();
-        $sale_price    = (float) $product->get_sale_price();
 
         if ( $regular_price <= 0 ) {
             return new WP_Error(
@@ -406,12 +767,22 @@ class Woo_Trendyol_Product_Creator {
             );
         }
 
-        $list_price = $regular_price;
-        $sale_price = $sale_price > 0 ? $sale_price : $regular_price;
+        $prices     = $this->category_helper->get_final_trendyol_prices( $product );
+        $list_price = $prices['listPrice'];
+        $sale_price = $prices['salePrice'];
 
-        // listPrice must be >= salePrice.
-        if ( $list_price < $sale_price ) {
-            $list_price = $sale_price;
+        if ( $is_bulk ) {
+            $min_price_opt = get_option( 'trendyol_price_rule_min_bulk_push_price', '' );
+            if ( '' !== $min_price_opt && is_numeric( $min_price_opt ) && $sale_price < (float) $min_price_opt ) {
+                return new WP_Error(
+                    'min_price_limit',
+                    sprintf(
+                        __( 'Price %1$s is below the minimum bulk push limit of %2$s.', 'woo-trendyol' ),
+                        number_format( $sale_price, 2 ),
+                        number_format( (float) $min_price_opt, 2 )
+                    )
+                );
+            }
         }
 
         // ---- Stock ----
@@ -448,10 +819,16 @@ class Woo_Trendyol_Product_Creator {
             return $attributes;
         }
 
+        // ---- Product title ----
+        $title = $this->get_product_attribute_value( $product, 'skr-item' );
+        if ( empty( $title ) ) {
+            $title = $product->get_name();
+        }
+
         // ---- Assemble payload ----
         $payload = [
             'barcode'          => $barcode, // Resolved via configured barcode source.
-            'title'            => mb_substr( $product->get_name(), 0, 100 ),
+            'title'            => mb_substr( $title, 0, 100 ),
             'productMainId'    => $sku,
             'brandId'          => $brand_id,
             'categoryId'       => $category_id,
@@ -535,7 +912,7 @@ class Woo_Trendyol_Product_Creator {
     /**
      * Build a plain-text product description suitable for Trendyol.
      *
-     * Uses short description first, falls back to main description.
+     * Uses main description first, falls back to short description.
      * Strips HTML tags and limits to 500 characters.
      *
      * @since  1.0.0
@@ -544,10 +921,10 @@ class Woo_Trendyol_Product_Creator {
      * @return string Plain-text description.
      */
     private function build_description( WC_Product $product ): string {
-        $raw = $product->get_short_description();
+        $raw = $product->get_description();
 
         if ( empty( $raw ) ) {
-            $raw = $product->get_description();
+            $raw = $product->get_short_description();
         }
 
         $plain = wp_strip_all_tags( $raw );

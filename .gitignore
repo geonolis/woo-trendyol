@@ -1,0 +1,19 @@
+# OS & IDE files
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Backups & temporary files
+*.bak
+*.tmp
+*.log
+
+# Test & scratch scripts
+test.php
+test-*.php
+test_*.php
+scratch/
