@@ -437,7 +437,14 @@ class Woo_Trendyol_Product_Sync {
             }
         }
 
-        return array_values( array_unique( $urls ) );
+        $unique_urls = array_values( array_unique( $urls ) );
+
+        // Trendyol API allows a maximum of 8 images per product.
+        if ( count( $unique_urls ) > 8 ) {
+            $unique_urls = array_slice( $unique_urls, 0, 8 );
+        }
+
+        return $unique_urls;
     }
 
     // -----------------------------------------------------------------------

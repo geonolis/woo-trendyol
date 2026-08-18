@@ -906,6 +906,11 @@ class Woo_Trendyol_Product_Creator {
             }
         }
 
+        // Trendyol API allows a maximum of 8 images per product.
+        if ( count( $images ) > 8 ) {
+            $images = array_slice( $images, 0, 8 );
+        }
+
         return $images;
     }
 
