@@ -34,8 +34,11 @@ class Woo_Trendyol_Import_Export {
             'options'    => []
         ];
 
-        // Export Global Attributes Mappings
-        $global_options = [
+        // 1. Export Global Attributes Mappings & Option Settings
+        $fixed_options = [
+            // Global Attributes fixed mappings
+            'trendyol_global_attr_brand_wc',
+            'trendyol_global_attr_character_wc',
             'trendyol_global_attr_gender_wc',
             'trendyol_global_attr_gender_map',
             'trendyol_global_attr_age_wc',
@@ -46,13 +49,55 @@ class Woo_Trendyol_Import_Export {
             'trendyol_global_attr_color_map',
             'trendyol_global_attr_color_custom_wc',
             'trendyol_global_attr_color_custom_map',
-            'trendyol_global_attr_brand_wc',
-            'trendyol_global_attr_character_wc',
+            'trendyol_discovered_global_attrs',
+            'trendyol_global_attr_names_cache',
+
+            // Product Defaults & Barcode settings
+            'trendyol_barcode_source',
+            'trendyol_barcode_meta_key',
+            'trendyol_barcode_attr_slug',
+            'trendyol_default_cargo_company_id',
+            'trendyol_default_vat_rate',
+            'trendyol_handling_time_type',
+            'trendyol_handling_time_days',
+            'trendyol_handling_time_wc_attr',
+
+            // Price Rules
+            'trendyol_price_rule_fixed_enabled',
+            'trendyol_price_rule_fixed_amount',
+            'trendyol_price_rule_percentage_enabled',
+            'trendyol_price_rule_percentage',
+            'trendyol_price_rule_vw_enabled',
+            'trendyol_price_rule_vw_under_1',
+            'trendyol_price_rule_vw_1_to_2',
+            'trendyol_price_rule_vw_2_to_3',
+            'trendyol_price_rule_vw_over_3_fixed',
+            'trendyol_price_rule_vw_over_3_coef',
+            'trendyol_price_rule_vw_zero_dimensions_amount',
+            'trendyol_price_rule_min_bulk_push_price',
         ];
 
-        foreach ( $global_options as $opt_name ) {
-            $val = get_option( $opt_name, '' );
-            if ( strpos( $opt_name, '_map' ) !== false && ! empty( $val ) ) {
+        // Gather all options starting with trendyol_global_attr_ from database (dynamic discovered attributes)
+        global $wpdb;
+        $global_attr_rows = $wpdb->get_results(
+            "SELECT option_name FROM {$wpdb->options} WHERE option_name LIKE 'trendyol_global_attr_%'",
+            ARRAY_A
+        );
+
+        $options_to_export = $fixed_options;
+        if ( ! empty( $global_attr_rows ) ) {
+            foreach ( $global_attr_rows as $row ) {
+                $options_to_export[] = $row['option_name'];
+            }
+        }
+        $options_to_export = array_unique( $options_to_export );
+
+        foreach ( $options_to_export as $opt_name ) {
+            $val = get_option( $opt_name, null );
+            if ( null === $val || false === $val ) {
+                continue;
+            }
+            if ( is_string( $val ) && strpos( $opt_name, '_map' ) !== false && ! empty( $val ) ) {
                 $decoded = json_decode( $val, true );
                 if ( is_array( $decoded ) ) {
                     $val = $decoded;
@@ -61,7 +106,7 @@ class Woo_Trendyol_Import_Export {
             $data['options'][$opt_name] = $val;
         }
 
-        // Export Brands
+        // 2. Export Brands
         if ( taxonomy_exists( 'product_brand' ) ) {
             $brands = get_terms( [
                 'taxonomy'   => 'product_brand',
@@ -91,7 +136,7 @@ class Woo_Trendyol_Import_Export {
             }
         }
 
-        // Export Categories
+        // 3. Export Categories
         $categories = get_terms( [
             'taxonomy'   => 'product_cat',
             'hide_empty' => false,
@@ -116,6 +161,7 @@ class Woo_Trendyol_Import_Export {
                         '_trendyol_attribute_value_mappings' => maybe_unserialize( get_term_meta( $cat->term_id, '_trendyol_attribute_value_mappings', true ) ),
                         '_trendyol_required_attributes'  => maybe_unserialize( get_term_meta( $cat->term_id, '_trendyol_required_attributes', true ) ),
                         'trendyol_category_extra_percentage' => get_term_meta( $cat->term_id, 'trendyol_category_extra_percentage', true ),
+                        'trendyol_exclude_bulk_push'     => get_term_meta( $cat->term_id, 'trendyol_exclude_bulk_push', true ),
                     ];
                     $data['categories'][] = $cat_data;
                 }
@@ -205,6 +251,9 @@ class Woo_Trendyol_Import_Export {
                     if ( isset( $cat_data['trendyol_category_extra_percentage'] ) ) {
                         update_term_meta( $term->term_id, 'trendyol_category_extra_percentage', $cat_data['trendyol_category_extra_percentage'] );
                     }
+                    if ( isset( $cat_data['trendyol_exclude_bulk_push'] ) ) {
+                        update_term_meta( $term->term_id, 'trendyol_exclude_bulk_push', $cat_data['trendyol_exclude_bulk_push'] );
+                    }
                     $categories_imported++;
                 }
             }
@@ -212,8 +261,16 @@ class Woo_Trendyol_Import_Export {
 
         // Import Options
         if ( ! empty( $data['options'] ) && is_array( $data['options'] ) ) {
+            $excluded_sensitive_options = [
+                'trendyol_api_key',
+                'trendyol_api_secret',
+                'trendyol_seller_id',
+            ];
             foreach ( $data['options'] as $opt_name => $opt_val ) {
-                if ( is_array( $opt_val ) && strpos( $opt_name, '_map' ) !== false ) {
+                if ( in_array( $opt_name, $excluded_sensitive_options, true ) ) {
+                    continue;
+                }
+                if ( is_array( $opt_val ) && strpos( $opt_name, '_map' ) !== false && ! in_array( $opt_name, [ 'trendyol_discovered_global_attrs', 'trendyol_global_attr_names_cache' ], true ) ) {
                     $opt_val = wp_json_encode( $opt_val, JSON_UNESCAPED_UNICODE );
                 }
                 update_option( $opt_name, $opt_val );
@@ -222,7 +279,7 @@ class Woo_Trendyol_Import_Export {
 
         wp_send_json_success( [
             /* translators: 1: number of categories, 2: number of brands */
-            'message' => sprintf( __( 'Import complete! Imported %1$d categories, %2$d brands, and global settings.', 'woo-trendyol' ), $categories_imported, $brands_imported )
+            'message' => sprintf( __( 'Import complete! Imported %1$d categories, %2$d brands, and settings/mappings.', 'woo-trendyol' ), $categories_imported, $brands_imported )
         ] );
     }
 }
