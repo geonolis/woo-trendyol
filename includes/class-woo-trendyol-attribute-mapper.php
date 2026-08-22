@@ -501,7 +501,14 @@ class Woo_Trendyol_Attribute_Mapper {
                 if ( empty( $wc_slug ) ) {
                     break;
                 }
+                $attr_val = $product->get_attribute( $wc_slug );
+                if ( ! empty( $attr_val ) ) {
+                    return [ 'attributeId' => $attr_id, 'customAttributeValue' => $attr_val ];
+                }
                 $term_names = wp_get_post_terms( $product->get_id(), $wc_slug, [ 'fields' => 'names' ] );
+                if ( ( is_wp_error( $term_names ) || empty( $term_names ) ) && $product->get_parent_id() ) {
+                    $term_names = wp_get_post_terms( $product->get_parent_id(), $wc_slug, [ 'fields' => 'names' ] );
+                }
                 if ( ! is_wp_error( $term_names ) && ! empty( $term_names ) ) {
                     return [ 'attributeId' => $attr_id, 'customAttributeValue' => $term_names[0] ];
                 }
@@ -574,6 +581,9 @@ class Woo_Trendyol_Attribute_Mapper {
                     // Fallback: try the product's brand meta (WooCommerce Brands plugin).
                     if ( 'brand' === $slot ) {
                         $brand_terms = get_the_terms( $product->get_id(), 'product_brand' );
+                        if ( ( ! $brand_terms || is_wp_error( $brand_terms ) ) && $product->get_parent_id() ) {
+                            $brand_terms = get_the_terms( $product->get_parent_id(), 'product_brand' );
+                        }
                         if ( $brand_terms && ! is_wp_error( $brand_terms ) ) {
                             $brand_name = $brand_terms[0]->name;
                             return $this->match_value( $attr_id, $brand_name, $attr_values, $allow_custom );
@@ -601,35 +611,77 @@ class Woo_Trendyol_Attribute_Mapper {
     private function get_product_term_slugs( WC_Product $product, string $wc_slug ): array {
         if ( 'dim_length' === $wc_slug ) {
             $val = (string) $product->get_length();
+            if ( '' === $val && $product->get_parent_id() ) {
+                $parent = wc_get_product( $product->get_parent_id() );
+                $val = $parent ? (string) $parent->get_length() : '';
+            }
             return '' !== $val ? [ $val, sanitize_title( $val ) ] : [];
         }
         if ( 'dim_width' === $wc_slug ) {
             $val = (string) $product->get_width();
+            if ( '' === $val && $product->get_parent_id() ) {
+                $parent = wc_get_product( $product->get_parent_id() );
+                $val = $parent ? (string) $parent->get_width() : '';
+            }
             return '' !== $val ? [ $val, sanitize_title( $val ) ] : [];
         }
         if ( 'dim_height' === $wc_slug ) {
             $val = (string) $product->get_height();
+            if ( '' === $val && $product->get_parent_id() ) {
+                $parent = wc_get_product( $product->get_parent_id() );
+                $val = $parent ? (string) $parent->get_height() : '';
+            }
             return '' !== $val ? [ $val, sanitize_title( $val ) ] : [];
         }
         if ( 'dim_weight' === $wc_slug ) {
             $val = (string) $product->get_weight();
+            if ( '' === $val && $product->get_parent_id() ) {
+                $parent = wc_get_product( $product->get_parent_id() );
+                $val = $parent ? (string) $parent->get_weight() : '';
+            }
             return '' !== $val ? [ $val, sanitize_title( $val ) ] : [];
         }
         if ( 0 === strpos( $wc_slug, 'meta:' ) ) {
             $meta_key = substr( $wc_slug, 5 );
             $val = (string) get_post_meta( $product->get_id(), $meta_key, true );
+            if ( '' === $val && $product->get_parent_id() ) {
+                $val = (string) get_post_meta( $product->get_parent_id(), $meta_key, true );
+            }
             return '' !== $val ? [ $val, sanitize_title( $val ) ] : [];
         }
 
         $attribute = $product->get_attribute( $wc_slug );
 
-        // get_attribute() returns a comma-separated string for text attrs.
+        // get_attribute() returns a comma-separated string for text attrs or single value for variation.
         if ( ! empty( $attribute ) && ! taxonomy_exists( $wc_slug ) ) {
             return array_map( 'sanitize_title', explode( ',', $attribute ) );
         }
 
         // Taxonomy-based attribute: fetch term slugs.
         $terms = wc_get_product_terms( $product->get_id(), $wc_slug, [ 'fields' => 'slugs' ] );
+        if ( ! empty( $terms ) && ! is_wp_error( $terms ) ) {
+            return $terms;
+        }
+
+        // If variation, check variation attribute directly (which might be term slug).
+        if ( ! empty( $attribute ) ) {
+            return array_map( 'sanitize_title', explode( ',', $attribute ) );
+        }
+
+        // Fall back to parent product terms if available.
+        if ( $product->get_parent_id() ) {
+            $parent_terms = wc_get_product_terms( $product->get_parent_id(), $wc_slug, [ 'fields' => 'slugs' ] );
+            if ( ! empty( $parent_terms ) && ! is_wp_error( $parent_terms ) ) {
+                return $parent_terms;
+            }
+            $parent = wc_get_product( $product->get_parent_id() );
+            if ( $parent ) {
+                $parent_attr = $parent->get_attribute( $wc_slug );
+                if ( ! empty( $parent_attr ) ) {
+                    return array_map( 'sanitize_title', explode( ',', $parent_attr ) );
+                }
+            }
+        }
 
         return is_array( $terms ) ? $terms : [];
     }
@@ -759,16 +811,35 @@ class Woo_Trendyol_Attribute_Mapper {
     private function load_wc_attributes( WC_Product $product ): array {
         $result = [];
 
+        // For variations, return parent product attributes as baseline.
+        if ( $product->is_type( 'variation' ) || ( $product->get_parent_id() ) ) {
+            $parent = wc_get_product( $product->get_parent_id() );
+            if ( $parent ) {
+                $result = $this->load_wc_attributes( $parent );
+            }
+        }
+
         foreach ( $product->get_attributes() as $slug => $attribute ) {
             $normalised = $this->normalise_slug( $slug );
             $value      = '';
 
-            if ( $attribute->is_taxonomy() ) {
-                $terms = wc_get_product_terms( $product->get_id(), $slug, [ 'fields' => 'names' ] );
-                $value = ! empty( $terms ) ? $terms[0] : '';
-            } else {
-                $options = $attribute->get_options();
-                $value   = ! empty( $options ) ? $options[0] : '';
+            if ( is_object( $attribute ) && method_exists( $attribute, 'is_taxonomy' ) ) {
+                if ( $attribute->is_taxonomy() ) {
+                    $terms = wc_get_product_terms( $product->get_id(), $slug, [ 'fields' => 'names' ] );
+                    $value = ! empty( $terms ) ? $terms[0] : '';
+                } else {
+                    $options = $attribute->get_options();
+                    $value   = ! empty( $options ) ? $options[0] : '';
+                }
+            } elseif ( is_string( $attribute ) && '' !== $attribute ) {
+                $value = $attribute;
+                $tax_name = taxonomy_exists( $slug ) ? $slug : ( taxonomy_exists( 'pa_' . $slug ) ? 'pa_' . $slug : '' );
+                if ( $tax_name ) {
+                    $term = get_term_by( 'slug', $attribute, $tax_name );
+                    if ( $term && ! is_wp_error( $term ) ) {
+                        $value = $term->name;
+                    }
+                }
             }
 
             if ( ! empty( $value ) ) {

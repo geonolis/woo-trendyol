@@ -1341,3 +1341,55 @@
     border-radius: 3px;
     font-size: 11px;
 }
+
+/* Log header & export actions */
+.wt-log-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 8px;
+    padding-bottom: 4px;
+    border-bottom: 1px solid #e0e0e0;
+}
+.wt-log-header h4 {
+    margin: 0;
+    font-size: 13px;
+    font-weight: 600;
+}
+.wt-log-actions {
+    display: flex;
+    gap: 6px;
+}
+.wt-log-actions .button-small {
+    font-size: 11px;
+    height: 24px;
+    line-height: 22px;
+    padding: 0 8px;
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+}
+.wt-log-actions .dashicons {
+    font-size: 14px;
+    width: 14px;
+    height: 14px;
+    line-height: 14px;
+}
+.wt-log-box {
+    font-family: Menlo, Monaco, Consolas, "Courier New", monospace;
+    font-size: 11px;
+    background: #fbfbfb;
+    border: 1px solid #e2e4e7;
+    border-radius: 4px;
+    padding: 8px;
+}
+.wt-log-item-failure {
+    margin-top: 4px;
+    padding-left: 14px;
+    font-size: 11px;
+    color: #b32d2e;
+}
+.wt-log-item-failure li {
+    margin-bottom: 2px;
+    list-style-type: disc;
+}

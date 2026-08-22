@@ -184,7 +184,7 @@ class Woo_Trendyol_API_Client {
      * @return array|WP_Error Decoded response array on success, WP_Error on failure.
      */
     public function test_connection(): array|WP_Error {
-        return $this->get( "/product/sellers/{$this->seller_id}/products", [ 'page' => 0, 'size' => 1 ] );
+        return $this->get( "/product/sellers/{$this->seller_id}/products/approved", [ 'page' => 0, 'size' => 1 ] );
     }
 
     // -----------------------------------------------------------------------
@@ -272,6 +272,22 @@ class Woo_Trendyol_API_Client {
      * @param string $barcode The product barcode.
      * @return array|WP_Error First matching unapproved product data, or WP_Error.
      */
+    /**
+     * Fetch unapproved products list from Trendyol.
+     *
+     * Endpoint: GET /product/sellers/{sellerId}/products/unapproved
+     *
+     * @since 1.0.0
+     * @param array $params Query parameters (e.g. page, size, barcode, etc.).
+     * @return array|WP_Error Paginated response or WP_Error.
+     */
+    public function get_unapproved_products( array $params = [] ): array|WP_Error {
+        return $this->get(
+            "/product/sellers/{$this->seller_id}/products/unapproved",
+            $params
+        );
+    }
+
     public function get_unapproved_product_base( string $barcode ): array|WP_Error {
         $response = $this->get(
             "/product/sellers/{$this->seller_id}/products/unapproved",
@@ -294,7 +310,42 @@ class Woo_Trendyol_API_Client {
             );
         }
 
-        return $items[0];
+        $item             = $items[0];
+        $item['approved'] = false;
+
+        // Promote variant-level properties to top level
+        if ( ! empty( $item['variants'] ) && is_array( $item['variants'] ) ) {
+            $matched_variant = $item['variants'][0];
+            foreach ( $item['variants'] as $v ) {
+                if ( isset( $v['barcode'] ) && (string) $v['barcode'] === (string) $barcode ) {
+                    $matched_variant = $v;
+                    break;
+                }
+            }
+            if ( ! isset( $item['onSale'] ) && isset( $matched_variant['onSale'] ) ) {
+                $item['onSale'] = ! empty( $matched_variant['onSale'] );
+            }
+            if ( ! isset( $item['archived'] ) && isset( $matched_variant['archived'] ) ) {
+                $item['archived'] = ! empty( $matched_variant['archived'] );
+            }
+            if ( ! isset( $item['blacklisted'] ) && isset( $matched_variant['blacklisted'] ) ) {
+                $item['blacklisted'] = ! empty( $matched_variant['blacklisted'] );
+            }
+            if ( ! isset( $item['locked'] ) && isset( $matched_variant['locked'] ) ) {
+                $item['locked'] = ! empty( $matched_variant['locked'] );
+            }
+            if ( isset( $matched_variant['stock']['quantity'] ) ) {
+                $item['quantity'] = $matched_variant['stock']['quantity'];
+            }
+            if ( isset( $matched_variant['price']['salePrice'] ) ) {
+                $item['salePrice'] = $matched_variant['price']['salePrice'];
+            }
+            if ( isset( $matched_variant['price']['listPrice'] ) ) {
+                $item['listPrice'] = $matched_variant['price']['listPrice'];
+            }
+        }
+
+        return $item;
     }
 
     /**
@@ -334,7 +385,7 @@ class Woo_Trendyol_API_Client {
     /**
      * Fetch a single product from Trendyol by barcode (SKU).
      *
-     * Endpoint: GET /product/sellers/{sellerId}/products?barcode={barcode}
+     * Endpoint: GET /product/sellers/{sellerId}/products/approved?barcode={barcode}
      *
      * @since 1.0.0
      * @param string $barcode The product barcode / SKU.
@@ -342,7 +393,7 @@ class Woo_Trendyol_API_Client {
      */
     public function get_product_base( string $barcode ): array|WP_Error {
         $response = $this->get(
-            "/product/sellers/{$this->seller_id}/products",
+            "/product/sellers/{$this->seller_id}/products/approved",
             [ 'barcode' => $barcode, 'size' => 1 ]
         );
 
@@ -355,7 +406,42 @@ class Woo_Trendyol_API_Client {
             return $this->get_unapproved_product_base( $barcode );
         }
 
-        return $items[0];
+        $item             = $items[0];
+        $item['approved'] = true;
+
+        // Promote variant-level properties to top level
+        if ( ! empty( $item['variants'] ) && is_array( $item['variants'] ) ) {
+            $matched_variant = $item['variants'][0];
+            foreach ( $item['variants'] as $v ) {
+                if ( isset( $v['barcode'] ) && (string) $v['barcode'] === (string) $barcode ) {
+                    $matched_variant = $v;
+                    break;
+                }
+            }
+            if ( ! isset( $item['onSale'] ) && isset( $matched_variant['onSale'] ) ) {
+                $item['onSale'] = ! empty( $matched_variant['onSale'] );
+            }
+            if ( ! isset( $item['archived'] ) && isset( $matched_variant['archived'] ) ) {
+                $item['archived'] = ! empty( $matched_variant['archived'] );
+            }
+            if ( ! isset( $item['blacklisted'] ) && isset( $matched_variant['blacklisted'] ) ) {
+                $item['blacklisted'] = ! empty( $matched_variant['blacklisted'] );
+            }
+            if ( ! isset( $item['locked'] ) && isset( $matched_variant['locked'] ) ) {
+                $item['locked'] = ! empty( $matched_variant['locked'] );
+            }
+            if ( isset( $matched_variant['stock']['quantity'] ) ) {
+                $item['quantity'] = $matched_variant['stock']['quantity'];
+            }
+            if ( isset( $matched_variant['price']['salePrice'] ) ) {
+                $item['salePrice'] = $matched_variant['price']['salePrice'];
+            }
+            if ( isset( $matched_variant['price']['listPrice'] ) ) {
+                $item['listPrice'] = $matched_variant['price']['listPrice'];
+            }
+        }
+
+        return $item;
     }
 
     /**
@@ -567,7 +653,7 @@ class Woo_Trendyol_API_Client {
      * @return array|WP_Error Decoded response or WP_Error.
      */
     public function get_shipment_packages( array $params = [] ): array|WP_Error {
-        return $this->get( "/order/sellers/{$this->seller_id}/orders/shipment-packages", $params );
+        return $this->get( "/order/sellers/{$this->seller_id}/orders", $params );
     }
 
     /**
@@ -618,6 +704,45 @@ class Woo_Trendyol_API_Client {
     }
 
     /**
+     * Notify Trendyol that a package is unsupplied / cancelled (out of stock).
+     *
+     * Endpoint: PUT /order/sellers/{sellerId}/shipment-packages/{packageId}/unsupplied
+     *
+     * @since 1.0.0
+     * @param string $package_id The Trendyol shipment package ID.
+     * @param array  $lines      Optional array of line items [ ['lineId' => ..., 'quantity' => ..., 'reasonId' => 501] ].
+     * @return array|WP_Error Decoded response or WP_Error.
+     */
+    public function mark_package_unsupplied( string $package_id, array $lines = [] ): array|WP_Error {
+        if ( empty( $lines ) ) {
+            // Fetch package details to populate line IDs
+            $pkg_response = $this->get_shipment_package( $package_id );
+            if ( ! is_wp_error( $pkg_response ) && ! empty( $pkg_response['content'][0]['lines'] ) ) {
+                foreach ( $pkg_response['content'][0]['lines'] as $line ) {
+                    $lines[] = [
+                        'lineId'   => (int) ( $line['lineId'] ?? $line['id'] ?? 0 ),
+                        'quantity' => (int) ( $line['quantity'] ?? 1 ),
+                        'reasonId' => 501, // Out of stock / Tedarik Edilemedi
+                    ];
+                }
+            }
+        }
+
+        $payload = [
+            'lines'  => $lines,
+            'params' => (object) [],
+        ];
+
+        $response = $this->put( "/order/sellers/{$this->seller_id}/shipment-packages/{$package_id}/unsupplied", $payload );
+
+        if ( is_wp_error( $response ) ) {
+            return $this->update_package_status( $package_id, 'UnSupplied' );
+        }
+
+        return $response;
+    }
+
+    /**
      * Retrieve a prepared common label (shipping voucher).
      *
      * Endpoint: GET /sellers/{sellerId}/common-label/query?id={cargoTrackingNumber}
@@ -638,7 +763,7 @@ class Woo_Trendyol_API_Client {
      * @return array|WP_Error Decoded response or WP_Error.
      */
     public function get_shipment_package( string $package_id ): array|WP_Error {
-        return $this->get( "/order/sellers/{$this->seller_id}/orders/shipment-packages", [ 'shipmentPackageIds' => $package_id ] );
+        return $this->get( "/order/sellers/{$this->seller_id}/orders", [ 'shipmentPackageIds' => $package_id ] );
     }
 
     // -----------------------------------------------------------------------

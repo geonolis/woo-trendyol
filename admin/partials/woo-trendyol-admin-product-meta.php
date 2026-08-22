@@ -41,6 +41,9 @@ $badge = static function ( string $value, string $yes_label = '', string $no_lab
         $label = $yes_label ?: esc_html__( 'Yes', 'woo-trendyol' );
         return '<span class="wt-badge wt-badge--success">' . esc_html( $label ) . '</span>';
     }
+    if ( 'partial' === $value ) {
+        return '<span class="wt-badge wt-badge--warning">' . esc_html__( 'Partial', 'woo-trendyol' ) . '</span>';
+    }
     $label = $no_label ?: esc_html__( 'No', 'woo-trendyol' );
     return '<span class="wt-badge wt-badge--error">' . esc_html( $label ) . '</span>';
 };
@@ -167,13 +170,31 @@ if ( 'success' === $sync_status ) {
             </li>
             <?php
             $product_obj = wc_get_product( $post_id );
-            $has_sku     = $product_obj && ! empty( $product_obj->get_sku() );
+            $has_sku     = false;
+            $sku_label   = '';
+            if ( $product_obj ) {
+                if ( $product_obj->is_type( 'variable' ) ) {
+                    if ( ! empty( $product_obj->get_sku() ) ) {
+                        $has_sku   = true;
+                        $sku_label = $product_obj->get_sku();
+                    } else {
+                        $children = $product_obj->get_children();
+                        if ( ! empty( $children ) ) {
+                            $has_sku   = true;
+                            $sku_label = sprintf( _n( '%d variation', '%d variations', count( $children ), 'woo-trendyol' ), count( $children ) );
+                        }
+                    }
+                } else {
+                    $has_sku   = ! empty( $product_obj->get_sku() );
+                    $sku_label = $product_obj->get_sku();
+                }
+            }
             ?>
             <li class="wt-prereq-item <?php echo $has_sku ? 'wt-prereq--ok' : 'wt-prereq--fail'; ?>">
                 <span class="wt-prereq-icon"><?php echo $has_sku ? '&#10003;' : '&#10007;'; ?></span>
                 <?php if ( $has_sku ) : ?>
                     <?php esc_html_e( 'SKU set', 'woo-trendyol' ); ?>
-                    <code class="wt-code wt-code--small"><?php echo esc_html( $product_obj->get_sku() ); ?></code>
+                    <code class="wt-code wt-code--small"><?php echo esc_html( $sku_label ); ?></code>
                 <?php else : ?>
                     <?php esc_html_e( 'No SKU — add a SKU to this product', 'woo-trendyol' ); ?>
                 <?php endif; ?>
@@ -266,6 +287,68 @@ if ( 'success' === $sync_status ) {
             </tr>
             <?php endif; ?>
         </table>
+
+        <?php if ( ! empty( $variations_data ) ) : ?>
+            <h5 style="margin: 18px 0 8px; font-size: 13px; font-weight: 600; color: #1d2327;">
+                <?php esc_html_e( 'Variations Sync Details', 'woo-trendyol' ); ?>
+            </h5>
+            <div class="wt-variations-table-wrapper" style="overflow-x: auto; margin-bottom: 12px;">
+                <table class="widefat striped" style="font-size: 12px; border: 1px solid #c3c4c7;">
+                    <thead>
+                        <tr>
+                            <th style="padding: 6px 8px;"><?php esc_html_e( 'Variation', 'woo-trendyol' ); ?></th>
+                            <th style="padding: 6px 8px;"><?php esc_html_e( 'Barcode', 'woo-trendyol' ); ?></th>
+                            <th style="padding: 6px 8px;"><?php esc_html_e( 'Approved', 'woo-trendyol' ); ?></th>
+                            <th style="padding: 6px 8px;"><?php esc_html_e( 'On Sale', 'woo-trendyol' ); ?></th>
+                            <th style="padding: 6px 8px;"><?php esc_html_e( 'Stock', 'woo-trendyol' ); ?></th>
+                            <th style="padding: 6px 8px;"><?php esc_html_e( 'Price', 'woo-trendyol' ); ?></th>
+                            <th style="padding: 6px 8px;"><?php esc_html_e( 'Status', 'woo-trendyol' ); ?></th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <?php foreach ( $variations_data as $v ) : ?>
+                            <tr>
+                                <td style="padding: 6px 8px;">
+                                    <strong>#<?php echo esc_html( $v['id'] ); ?></strong>
+                                    <?php if ( ! empty( $v['name'] ) ) : ?>
+                                        <br><small style="color: #646970;"><?php echo esc_html( $v['name'] ); ?></small>
+                                    <?php endif; ?>
+                                </td>
+                                <td style="padding: 6px 8px;">
+                                    <?php if ( ! empty( $v['barcode'] ) ) : ?>
+                                        <code><?php echo esc_html( $v['barcode'] ); ?></code>
+                                    <?php else : ?>
+                                        <span class="wt-badge wt-badge--error"><?php esc_html_e( 'Missing', 'woo-trendyol' ); ?></span>
+                                    <?php endif; ?>
+                                </td>
+                                <td style="padding: 6px 8px;"><?php echo $badge( $v['approved'], __( 'Yes', 'woo-trendyol' ), __( 'No', 'woo-trendyol' ) ); // phpcs:ignore WordPress.Security.EscapeOutput ?></td>
+                                <td style="padding: 6px 8px;"><?php echo $badge( $v['on_sale'], __( 'Yes', 'woo-trendyol' ), __( 'No', 'woo-trendyol' ) ); // phpcs:ignore WordPress.Security.EscapeOutput ?></td>
+                                <td style="padding: 6px 8px;"><?php echo esc_html( (string) $v['stock'] ); ?></td>
+                                <td style="padding: 6px 8px;">
+                                    <?php if ( $v['sale_price'] < $v['list_price'] ) : ?>
+                                        <del style="color: #8c8f94; font-size: 11px;"><?php echo esc_html( number_format( $v['list_price'], 2 ) ); ?></del><br>
+                                        <strong><?php echo esc_html( number_format( $v['sale_price'], 2 ) ); ?> &euro;</strong>
+                                    <?php else : ?>
+                                        <?php echo esc_html( number_format( $v['sale_price'], 2 ) ); ?> &euro;
+                                    <?php endif; ?>
+                                </td>
+                                <td style="padding: 6px 8px;">
+                                    <?php if ( 'success' === $v['sync_status'] ) : ?>
+                                        <span class="wt-badge wt-badge--success"><?php esc_html_e( 'Synced', 'woo-trendyol' ); ?></span>
+                                    <?php elseif ( 'error' === $v['sync_status'] ) : ?>
+                                        <span class="wt-badge wt-badge--error" title="<?php echo esc_attr( $v['sync_error'] ); ?>"><?php esc_html_e( 'Error', 'woo-trendyol' ); ?></span>
+                                    <?php elseif ( 'pending' === $v['sync_status'] ) : ?>
+                                        <span class="wt-badge wt-badge--pending"><?php esc_html_e( 'Pending', 'woo-trendyol' ); ?></span>
+                                    <?php else : ?>
+                                        <span class="wt-badge wt-badge--unknown"><?php esc_html_e( 'Not synced', 'woo-trendyol' ); ?></span>
+                                    <?php endif; ?>
+                                </td>
+                            </tr>
+                        <?php endforeach; ?>
+                    </tbody>
+                </table>
+            </div>
+        <?php endif; ?>
 
         <!-- Refresh status button -->
         <div class="wt-refresh-row">

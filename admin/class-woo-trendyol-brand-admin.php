@@ -278,6 +278,10 @@ class Woo_Trendyol_Brand_Admin {
                     <div class="wt-progress-bar-fill" id="wt-brand-progress-fill" style="width:0%"></div>
                 </div>
                 <p class="wt-progress-label" id="wt-brand-progress-text">0 / 0</p>
+                <p class="wt-keep-tab-open-notice" style="margin-top:6px; font-size:12px; color:#b32d2e; font-weight:500; text-align:center;">
+                    <span class="dashicons dashicons-warning" style="font-size:14px; width:14px; height:14px; vertical-align:-2px;"></span>
+                    <?php esc_html_e( 'Please keep this browser tab open until the process finishes.', 'woo-trendyol' ); ?>
+                </p>
             </div>
 
             <div id="wt-brand-results" class="wt-results" style="display:none; margin-top:10px;">

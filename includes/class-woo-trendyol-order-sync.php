@@ -224,10 +224,10 @@ class Woo_Trendyol_Order_Sync {
         $last_poll  = (int) get_option( 'trendyol_last_order_poll', 0 );
         $now        = time();
 
-        // Default to last 24 hours on first run.
+        // Default to last 7 days on first run (with 1 hour overlap on subsequent runs to prevent race conditions).
         $start_date = $last_poll > 0
-            ? ( $last_poll * 1000 )
-            : ( ( $now - DAY_IN_SECONDS ) * 1000 );
+            ? ( ( $last_poll - HOUR_IN_SECONDS ) * 1000 )
+            : ( ( $now - ( 7 * DAY_IN_SECONDS ) ) * 1000 );
         $end_date   = $now * 1000;
 
         $this->logger->info(
@@ -239,11 +239,12 @@ class Woo_Trendyol_Order_Sync {
         );
 
         $response = $this->api->get_shipment_packages( [
-            'startDate' => $start_date,
-            'endDate'   => $end_date,
-            'status'    => 'Created',
-            'page'      => 0,
-            'size'      => 200,
+            'startDate'          => $start_date,
+            'endDate'            => $end_date,
+            'orderByField'       => 'PackageLastModifiedDate',
+            'orderByDirection'   => 'DESC',
+            'page'               => 0,
+            'size'               => 200,
         ] );
 
         if ( is_wp_error( $response ) ) {
@@ -388,6 +389,64 @@ class Woo_Trendyol_Order_Sync {
         );
     }
 
+    /**
+     * Notify Trendyol when a WC order is Cancelled.
+     *
+     * Hooked to: woocommerce_order_status_cancelled
+     *
+     * @since 1.0.0
+     * @param int $order_id WooCommerce order ID.
+     */
+    public function on_order_cancelled( int $order_id ): void {
+        if ( ! $this->api->is_active() ) {
+            return;
+        }
+
+        $order = wc_get_order( $order_id );
+        if ( ! $order instanceof WC_Order ) {
+            return;
+        }
+
+        $package_id = $order->get_meta( self::META_PACKAGE_ID, true );
+        if ( empty( $package_id ) ) {
+            return; // Not a Trendyol order.
+        }
+
+        // Avoid duplicate notification if status was updated by polling Trendyol
+        $already_cancelled = $order->get_meta( '_trendyol_notified_cancelled', true );
+        if ( 'yes' === $already_cancelled ) {
+            return;
+        }
+
+        $response = $this->api->mark_package_unsupplied( (string) $package_id );
+
+        if ( is_wp_error( $response ) ) {
+            $this->logger->error(
+                sprintf(
+                    'Failed to notify Trendyol cancellation for order %d (package %s): %s',
+                    $order_id,
+                    $package_id,
+                    $response->get_error_message()
+                )
+            );
+            $order->add_order_note( sprintf( __( 'Could not notify Trendyol of cancellation: %s', 'woo-trendyol' ), $response->get_error_message() ) );
+            $order->save();
+            return;
+        }
+
+        $order->update_meta_data( '_trendyol_notified_cancelled', 'yes' );
+        $order->add_order_note( __( 'Trendyol notified: order cancelled / unsupplied (out of stock).', 'woo-trendyol' ) );
+        $order->save();
+
+        $this->logger->info(
+            sprintf(
+                'Trendyol notified: order %d (package %s) cancelled / unsupplied.',
+                $order_id,
+                $package_id
+            )
+        );
+    }
+
     // -----------------------------------------------------------------------
     // Private — order creation
     // -----------------------------------------------------------------------
@@ -477,8 +536,11 @@ class Woo_Trendyol_Order_Sync {
                 )
             );
 
-            // Recalculate totals, then save once — avoids redundant save() calls.
-            $order->calculate_totals();
+            // Calculate taxes first, then totals — avoids duplicate tax addition.
+            if ( wc_tax_enabled() ) {
+                $order->calculate_taxes();
+            }
+            $order->calculate_totals( false );
             $order->save();
 
             $this->logger->info(
@@ -569,22 +631,67 @@ class Woo_Trendyol_Order_Sync {
             $price        = (float)  ( $line['amount']      ?? 0  );
             $name         = (string) ( $line['productName'] ?? ( $merchant_sku ?: $barcode ) );
 
-            // Attempt to match by SKU (merchantSku).
+            // Attempt to match by SKU (merchantSku), then by barcode / GTIN.
             $product_id = 0;
             if ( ! empty( $merchant_sku ) ) {
                 $product_id = wc_get_product_id_by_sku( $merchant_sku );
             }
 
+            if ( ! $product_id && ! empty( $barcode ) ) {
+                $product_id = wc_get_product_id_by_sku( $barcode );
+            }
+
+            if ( ! $product_id && ! empty( $barcode ) ) {
+                // Check _global_unique_id (WooCommerce 9.2+ GTIN/EAN)
+                $found = wc_get_products( [
+                    'meta_key'   => '_global_unique_id',
+                    'meta_value' => $barcode,
+                    'limit'      => 1,
+                    'return'     => 'ids',
+                ] );
+                if ( ! empty( $found ) ) {
+                    $product_id = $found[0];
+                }
+            }
+
+            if ( ! $product_id && ! empty( $barcode ) ) {
+                // Check custom barcode meta if configured
+                $meta_key = (string) get_option( 'trendyol_barcode_meta_key', '' );
+                if ( ! empty( $meta_key ) ) {
+                    $found = wc_get_products( [
+                        'meta_key'   => $meta_key,
+                        'meta_value' => $barcode,
+                        'limit'      => 1,
+                        'return'     => 'ids',
+                    ] );
+                    if ( ! empty( $found ) ) {
+                        $product_id = $found[0];
+                    }
+                }
+            }
+
+            $gross_line_total = $price * $quantity;
+
             if ( $product_id ) {
                 $product = wc_get_product( $product_id );
 
                 if ( $product ) {
+                    // Extract net amount from Trendyol gross amount (which includes VAT)
+                    $tax_rates = WC_Tax::get_rates( $product->get_tax_class() );
+                    if ( wc_tax_enabled() && ! empty( $tax_rates ) ) {
+                        $taxes      = WC_Tax::calc_inclusive_tax( $gross_line_total, $tax_rates );
+                        $tax_amount = array_sum( $taxes );
+                        $net_total  = $gross_line_total - $tax_amount;
+                    } else {
+                        $net_total = $gross_line_total;
+                    }
+
                     // Add a proper product line item.
                     $item = new WC_Order_Item_Product();
                     $item->set_product( $product );
                     $item->set_quantity( $quantity );
-                    $item->set_subtotal( $price * $quantity );
-                    $item->set_total( $price * $quantity );
+                    $item->set_subtotal( $net_total );
+                    $item->set_total( $net_total );
 
                     // Store the Trendyol reference details on the line item for reference.
                     $item->add_meta_data( '_trendyol_merchant_sku', $merchant_sku );
@@ -598,6 +705,15 @@ class Woo_Trendyol_Order_Sync {
             }
 
             // No matching WC product — add as a fee line so the order total is correct.
+            $tax_rates = WC_Tax::get_rates();
+            if ( wc_tax_enabled() && ! empty( $tax_rates ) ) {
+                $taxes      = WC_Tax::calc_inclusive_tax( $gross_line_total, $tax_rates );
+                $tax_amount = array_sum( $taxes );
+                $net_fee    = $gross_line_total - $tax_amount;
+            } else {
+                $net_fee = $gross_line_total;
+            }
+
             $fee = new WC_Order_Item_Fee();
             $fee_name = sanitize_text_field( $name );
             if ( ! empty( $merchant_sku ) ) {
@@ -606,8 +722,11 @@ class Woo_Trendyol_Order_Sync {
                 $fee_name .= ' (' . esc_html( $barcode ) . ')';
             }
             $fee->set_name( $fee_name );
-            $fee->set_amount( $price * $quantity );
-            $fee->set_total( $price * $quantity );
+            $fee->set_amount( $net_fee );
+            $fee->set_total( $net_fee );
+            if ( wc_tax_enabled() && ! empty( $tax_rates ) ) {
+                $fee->set_tax_status( 'taxable' );
+            }
 
             $order->add_item( $fee );
         }
@@ -626,10 +745,19 @@ class Woo_Trendyol_Order_Sync {
      */
     private function add_shipping( WC_Order $order, array $package ): void {
         // Trendyol stores the shipping cost in 'cargoAmount' (not agreedDeliveryDate).
-        $shipping_cost = (float) ( $package['cargoAmount'] ?? 0 );
+        $shipping_gross = (float) ( $package['cargoAmount'] ?? 0 );
 
-        if ( $shipping_cost <= 0 ) {
+        if ( $shipping_gross <= 0 ) {
             return;
+        }
+
+        $tax_rates = WC_Tax::get_shipping_tax_rates();
+        if ( wc_tax_enabled() && ! empty( $tax_rates ) ) {
+            $taxes        = WC_Tax::calc_inclusive_tax( $shipping_gross, $tax_rates );
+            $tax_amount   = array_sum( $taxes );
+            $net_shipping = $shipping_gross - $tax_amount;
+        } else {
+            $net_shipping = $shipping_gross;
         }
 
         $shipping = new WC_Order_Item_Shipping();
@@ -638,7 +766,7 @@ class Woo_Trendyol_Order_Sync {
                 $package['cargoProviderName'] ?? __( 'Trendyol Shipping', 'woo-trendyol' )
             )
         );
-        $shipping->set_total( $shipping_cost );
+        $shipping->set_total( $net_shipping );
 
         $order->add_item( $shipping );
     }

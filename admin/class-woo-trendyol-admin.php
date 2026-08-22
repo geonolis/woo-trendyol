@@ -1428,9 +1428,15 @@ class Woo_Trendyol_Admin {
      */
     public function render_product_meta_box( $post_or_object ): void {
         // Normalise to a post ID regardless of the argument type.
-        $post_id = ( $post_or_object instanceof WP_Post )
-            ? $post_or_object->ID
-            : (int) $post_or_object->get_id();
+        if ( is_numeric( $post_or_object ) ) {
+            $post_id = (int) $post_or_object;
+        } elseif ( $post_or_object instanceof WP_Post ) {
+            $post_id = $post_or_object->ID;
+        } elseif ( is_object( $post_or_object ) && method_exists( $post_or_object, 'get_id' ) ) {
+            $post_id = (int) $post_or_object->get_id();
+        } else {
+            return;
+        }
 
         // Re-fetch as WP_Post to keep downstream code consistent.
         $post = get_post( $post_id );
@@ -1465,20 +1471,123 @@ class Woo_Trendyol_Admin {
         // ---- Price override ----
         $price_override  = get_post_meta( $post_id, '_trendyol_price_override', true );
 
-        // ---- Calculated price display ----
+        // ---- Calculated price display & Variable product breakdown ----
         $calculated_price_display = '';
-        $product_obj = wc_get_product( $post_id );
+        $variations_data          = [];
+        $product_obj              = wc_get_product( $post_id );
+
         if ( $product_obj ) {
             if ( $product_obj->is_type( 'variable' ) ) {
-                $prices = [];
-                foreach ( $product_obj->get_children() as $child_id ) {
+                $prices               = [];
+                $children             = $product_obj->get_children();
+                $any_var_sent         = false;
+                $all_var_approved     = true;
+                $any_var_approved     = false;
+                $any_var_on_sale      = false;
+                $any_var_archived     = false;
+                $any_var_blacklisted  = false;
+                $latest_var_sync      = 0;
+
+                $has_var_approval_val = false;
+                $has_var_onsale_val   = false;
+                $has_var_archived_val = false;
+                $all_var_archived     = true;
+
+                foreach ( $children as $child_id ) {
                     $variation = wc_get_product( $child_id );
-                    if ( $variation ) {
-                        $v_prices = $this->category_helper->get_final_trendyol_prices( $variation );
-                        $prices[] = $v_prices['listPrice'];
-                        $prices[] = $v_prices['salePrice'];
+                    if ( ! $variation || 'trash' === $variation->get_status() ) {
+                        continue;
+                    }
+
+                    $v_prices = $this->category_helper->get_final_trendyol_prices( $variation );
+                    $prices[] = $v_prices['listPrice'];
+                    $prices[] = $v_prices['salePrice'];
+
+                    $var_barcode     = $this->product_creator->resolve_barcode( $variation );
+                    $var_sent        = get_post_meta( $child_id, '_trendyol_sent', true );
+                    $var_approved    = get_post_meta( $child_id, '_trendyol_approved', true );
+                    $var_on_sale     = get_post_meta( $child_id, '_trendyol_on_sale', true );
+                    $var_archived    = get_post_meta( $child_id, '_trendyol_archived', true );
+                    $var_blacklisted = get_post_meta( $child_id, '_trendyol_blacklisted', true );
+                    $var_last_sync   = (int) get_post_meta( $child_id, '_trendyol_last_sync', true );
+                    $var_sync_status = get_post_meta( $child_id, '_trendyol_sync_status', true );
+                    $var_sync_error  = get_post_meta( $child_id, '_trendyol_sync_error', true );
+                    $var_batch_id    = get_post_meta( $child_id, '_trendyol_batch_id', true );
+
+                    $var_stock = $variation->managing_stock()
+                        ? $variation->get_stock_quantity()
+                        : ( $product_obj->managing_stock() ? $product_obj->get_stock_quantity() : ( $variation->is_in_stock() ? __( 'In stock', 'woo-trendyol' ) : __( 'Out of stock', 'woo-trendyol' ) ) );
+
+                    if ( 'yes' === $var_sent ) { $any_var_sent = true; }
+                    if ( '' !== $var_approved ) {
+                        $has_var_approval_val = true;
+                        if ( 'yes' === $var_approved ) {
+                            $any_var_approved = true;
+                        } else {
+                            $all_var_approved = false;
+                        }
+                    } else {
+                        $all_var_approved = false;
+                    }
+                    if ( '' !== $var_on_sale ) {
+                        $has_var_onsale_val = true;
+                        if ( 'yes' === $var_on_sale ) {
+                            $any_var_on_sale = true;
+                        }
+                    }
+                    if ( '' !== $var_archived ) {
+                        $has_var_archived_val = true;
+                        if ( 'yes' === $var_archived ) {
+                            $any_var_archived = true;
+                        } else {
+                            $all_var_archived = false;
+                        }
+                    } else {
+                        $all_var_archived = false;
+                    }
+                    if ( 'yes' === $var_blacklisted ) { $any_var_blacklisted = true; }
+                    if ( $var_last_sync > $latest_var_sync ) { $latest_var_sync = $var_last_sync; }
+
+                    $variations_data[] = [
+                        'id'          => $child_id,
+                        'name'        => wc_get_formatted_variation( $variation, true, false, false ),
+                        'sku'         => $variation->get_sku(),
+                        'barcode'     => $var_barcode,
+                        'sent'        => $var_sent,
+                        'approved'    => $var_approved,
+                        'on_sale'     => $var_on_sale,
+                        'archived'    => $var_archived,
+                        'blacklisted' => $var_blacklisted,
+                        'last_sync'   => $var_last_sync,
+                        'stock'       => $var_stock,
+                        'list_price'  => $v_prices['listPrice'],
+                        'sale_price'  => $v_prices['salePrice'],
+                        'sync_status' => $var_sync_status,
+                        'sync_error'  => $var_sync_error,
+                        'batch_id'    => $var_batch_id,
+                    ];
+                }
+
+                // For variable products, aggregate status dynamically from child variations
+                if ( ! empty( $variations_data ) ) {
+                    if ( $any_var_sent ) {
+                        $sent = 'yes';
+                    }
+                    if ( $has_var_approval_val ) {
+                        $approved = ( $all_var_approved && $any_var_approved ) ? 'yes' : ( $any_var_approved ? 'partial' : 'no' );
+                    }
+                    if ( $has_var_onsale_val ) {
+                        $on_sale = $any_var_on_sale ? 'yes' : 'no';
+                    }
+                    if ( $has_var_archived_val ) {
+                        $archived = $all_var_archived ? 'yes' : ( $any_var_archived ? 'partial' : 'no' );
+                    }
+                    $blacklisted = $any_var_blacklisted ? 'yes' : 'no';
+                    if ( $latest_var_sync > 0 ) {
+                        $last_sync = $latest_var_sync;
                     }
                 }
+
                 if ( ! empty( $prices ) ) {
                     $min_price = min( $prices );
                     $max_price = max( $prices );
@@ -1635,34 +1744,123 @@ class Woo_Trendyol_Admin {
             wp_send_json_error( [ 'message' => __( 'Product not found.', 'woo-trendyol' ) ] );
         }
 
-        $barcode = $this->product_creator->resolve_barcode( $product );
-        if ( empty( $barcode ) ) {
-            wp_send_json_error( [ 'message' => __( 'Product has no barcode. Cannot fetch Trendyol status.', 'woo-trendyol' ) ] );
+        if ( $product->is_type( 'variable' ) ) {
+            $children = $product->get_children();
+            if ( empty( $children ) ) {
+                wp_send_json_error( [ 'message' => __( 'Variable product has no variations.', 'woo-trendyol' ) ] );
+            }
+
+            $all_approved    = true;
+            $any_approved    = false;
+            $any_on_sale     = false;
+            $any_archived    = false;
+            $any_blacklisted = false;
+            $checked_count   = 0;
+            $errors          = [];
+
+            foreach ( $children as $child_id ) {
+                $variation = wc_get_product( $child_id );
+                if ( ! $variation || 'trash' === $variation->get_status() ) {
+                    continue;
+                }
+
+                $barcode = $this->product_creator->resolve_barcode( $variation );
+                if ( empty( $barcode ) ) {
+                    $errors[] = sprintf( __( 'Variation #%d has no barcode.', 'woo-trendyol' ), $child_id );
+                    continue;
+                }
+
+                $trendyol_product = $this->api->get_product_base( $barcode );
+                if ( is_wp_error( $trendyol_product ) ) {
+                    $errors[] = sprintf( __( 'Variation #%d (%s): %s', 'woo-trendyol' ), $child_id, $barcode, $trendyol_product->get_error_message() );
+                    update_post_meta( $child_id, '_trendyol_sync_status', 'error' );
+                    update_post_meta( $child_id, '_trendyol_sync_error',  $trendyol_product->get_error_message() );
+                    continue;
+                }
+
+                $checked_count++;
+                $approved    = $trendyol_product['approved']    ?? null;
+                $on_sale     = $trendyol_product['onSale']      ?? null;
+                $archived    = $trendyol_product['archived']    ?? null;
+                $blacklisted = $trendyol_product['blacklisted'] ?? null;
+
+                if ( null !== $approved ) {
+                    update_post_meta( $child_id, '_trendyol_approved', $approved ? 'yes' : 'no' );
+                    if ( $approved ) { $any_approved = true; } else { $all_approved = false; }
+                }
+                if ( null !== $on_sale ) {
+                    update_post_meta( $child_id, '_trendyol_on_sale', $on_sale ? 'yes' : 'no' );
+                    if ( $on_sale ) { $any_on_sale = true; }
+                }
+                if ( null !== $archived ) {
+                    update_post_meta( $child_id, '_trendyol_archived', $archived ? 'yes' : 'no' );
+                    if ( $archived ) { $any_archived = true; }
+                }
+                if ( null !== $blacklisted ) {
+                    update_post_meta( $child_id, '_trendyol_blacklisted', $blacklisted ? 'yes' : 'no' );
+                    if ( $blacklisted ) { $any_blacklisted = true; }
+                }
+
+                update_post_meta( $child_id, '_trendyol_sent', 'yes' );
+                update_post_meta( $child_id, '_trendyol_last_sync', time() );
+                update_post_meta( $child_id, '_trendyol_sync_status', 'success' );
+                update_post_meta( $child_id, '_trendyol_sync_error', '' );
+            }
+
+            if ( $checked_count > 0 ) {
+                update_post_meta( $post_id, '_trendyol_sent', 'yes' );
+                update_post_meta( $post_id, '_trendyol_approved', ( $all_approved && $any_approved ) ? 'yes' : ( $any_approved ? 'partial' : 'no' ) );
+                update_post_meta( $post_id, '_trendyol_on_sale', $any_on_sale ? 'yes' : 'no' );
+                update_post_meta( $post_id, '_trendyol_archived', $any_archived ? 'yes' : 'no' );
+                update_post_meta( $post_id, '_trendyol_blacklisted', $any_blacklisted ? 'yes' : 'no' );
+                update_post_meta( $post_id, '_trendyol_last_sync', time() );
+                update_post_meta( $post_id, '_trendyol_sync_status', empty( $errors ) ? 'success' : 'error' );
+                if ( ! empty( $errors ) ) {
+                    update_post_meta( $post_id, '_trendyol_sync_error', implode( '; ', $errors ) );
+                } else {
+                    update_post_meta( $post_id, '_trendyol_sync_error', '' );
+                }
+
+                wp_send_json_success( [
+                    'message'     => sprintf( __( 'Status refreshed for %d variations.', 'woo-trendyol' ), $checked_count ),
+                    'approved'    => ( $all_approved && $any_approved ) ? 'yes' : ( $any_approved ? 'partial' : 'no' ),
+                    'on_sale'     => $any_on_sale ? 'yes' : 'no',
+                    'archived'    => $any_archived ? 'yes' : 'no',
+                    'blacklisted' => $any_blacklisted ? 'yes' : 'no',
+                ] );
+            } else {
+                wp_send_json_error( [ 'message' => ! empty( $errors ) ? implode( '<br>', $errors ) : __( 'No valid variations found to refresh.', 'woo-trendyol' ) ] );
+            }
+        } else {
+            $barcode = $this->product_creator->resolve_barcode( $product );
+            if ( empty( $barcode ) ) {
+                wp_send_json_error( [ 'message' => __( 'Product has no barcode. Cannot fetch Trendyol status.', 'woo-trendyol' ) ] );
+            }
+
+            $trendyol_product = $this->api->get_product_base( $barcode );
+
+            if ( is_wp_error( $trendyol_product ) ) {
+                wp_send_json_error( [ 'message' => $trendyol_product->get_error_message() ] );
+            }
+
+            $approved    = $trendyol_product['approved']    ?? null;
+            $on_sale     = $trendyol_product['onSale']      ?? null;
+            $archived    = $trendyol_product['archived']    ?? null;
+            $blacklisted = $trendyol_product['blacklisted'] ?? null;
+
+            if ( null !== $approved )    update_post_meta( $post_id, '_trendyol_approved',    $approved    ? 'yes' : 'no' );
+            if ( null !== $on_sale )     update_post_meta( $post_id, '_trendyol_on_sale',     $on_sale     ? 'yes' : 'no' );
+            if ( null !== $archived )    update_post_meta( $post_id, '_trendyol_archived',    $archived    ? 'yes' : 'no' );
+            if ( null !== $blacklisted ) update_post_meta( $post_id, '_trendyol_blacklisted', $blacklisted ? 'yes' : 'no' );
+
+            wp_send_json_success( [
+                'message'     => __( 'Status refreshed successfully.', 'woo-trendyol' ),
+                'approved'    => $approved,
+                'on_sale'     => $on_sale,
+                'archived'    => $archived,
+                'blacklisted' => $blacklisted,
+            ] );
         }
-
-        $trendyol_product = $this->api->get_product_base( $barcode );
-
-        if ( is_wp_error( $trendyol_product ) ) {
-            wp_send_json_error( [ 'message' => $trendyol_product->get_error_message() ] );
-        }
-
-        $approved    = $trendyol_product['approved']    ?? null;
-        $on_sale     = $trendyol_product['onSale']      ?? null;
-        $archived    = $trendyol_product['archived']    ?? null;
-        $blacklisted = $trendyol_product['blacklisted'] ?? null;
-
-        if ( null !== $approved )    update_post_meta( $post_id, '_trendyol_approved',    $approved    ? 'yes' : 'no' );
-        if ( null !== $on_sale )     update_post_meta( $post_id, '_trendyol_on_sale',     $on_sale     ? 'yes' : 'no' );
-        if ( null !== $archived )    update_post_meta( $post_id, '_trendyol_archived',    $archived    ? 'yes' : 'no' );
-        if ( null !== $blacklisted ) update_post_meta( $post_id, '_trendyol_blacklisted', $blacklisted ? 'yes' : 'no' );
-
-        wp_send_json_success( [
-            'message'     => __( 'Status refreshed successfully.', 'woo-trendyol' ),
-            'approved'    => $approved,
-            'on_sale'     => $on_sale,
-            'archived'    => $archived,
-            'blacklisted' => $blacklisted,
-        ] );
     }
 
     /**
@@ -1853,6 +2051,161 @@ class Woo_Trendyol_Admin {
 
         $product_ids = array_map( 'absint', $raw_ids );
         $result      = $this->product_creator->sync_price_and_stock( $product_ids );
+
+        if ( is_wp_error( $result ) ) {
+            wp_send_json_error( [ 'message' => $result->get_error_message() ] );
+        }
+
+        wp_send_json_success( $result );
+    }
+
+    /**
+     * Handle AJAX request to retrieve all product IDs eligible for Unapproved Products Update.
+     *
+     * Queries Trendyol API for unapproved products and checks local WooCommerce unapproved products.
+     *
+     * Action: wp_ajax_trendyol_get_unapproved_products_to_update
+     *
+     * @since 1.0.0
+     */
+    public function ajax_get_unapproved_products_to_update(): void {
+        check_ajax_referer( 'woo_trendyol_admin', 'nonce' );
+
+        if ( ! current_user_can( 'manage_woocommerce' ) ) {
+            wp_send_json_error( [ 'message' => __( 'Permission denied.', 'woo-trendyol' ) ] );
+        }
+
+        global $wpdb;
+        $matched_product_ids = [];
+
+        // 1. Fetch unapproved products from Trendyol API (pages 0-9, up to 1000 items)
+        for ( $page = 0; $page < 10; $page++ ) {
+            $ty_res = $this->api->get_unapproved_products( [ 'page' => $page, 'size' => 100 ] );
+            if ( is_wp_error( $ty_res ) || empty( $ty_res['content'] ) ) {
+                break;
+            }
+
+            foreach ( $ty_res['content'] as $item ) {
+                $barcode         = (string) ( $item['barcode'] ?? '' );
+                $stock_code      = (string) ( $item['stockCode'] ?? '' );
+                $product_main_id = (string) ( $item['productMainId'] ?? '' );
+
+                $pid = 0;
+                if ( ! empty( $barcode ) ) {
+                    $pid = wc_get_product_id_by_sku( $barcode );
+                }
+                if ( ! $pid && ! empty( $stock_code ) ) {
+                    $pid = wc_get_product_id_by_sku( $stock_code );
+                }
+                if ( ! $pid && ! empty( $product_main_id ) ) {
+                    $pid = wc_get_product_id_by_sku( $product_main_id );
+                }
+                if ( ! $pid && ! empty( $barcode ) ) {
+                    $pid = (int) $wpdb->get_var(
+                        $wpdb->prepare(
+                            "SELECT post_id FROM {$wpdb->postmeta} WHERE meta_key IN ('_global_unique_id', '_variation_ean', '_barcode', '_sku', 'barcode', 'ean') AND meta_value = %s LIMIT 1",
+                            $barcode
+                        )
+                    );
+                }
+                if ( ! $pid && ! empty( $barcode ) ) {
+                    $pid = (int) $wpdb->get_var(
+                        $wpdb->prepare(
+                            "SELECT post_id FROM {$wpdb->postmeta} WHERE meta_key = '_product_attributes' AND meta_value LIKE %s LIMIT 1",
+                            '%' . $wpdb->esc_like( $barcode ) . '%'
+                        )
+                    );
+                }
+
+                if ( $pid ) {
+                    $p = wc_get_product( $pid );
+                    if ( $p ) {
+                        $parent_id = $p->get_parent_id();
+                        $target_id = $parent_id ? $parent_id : $pid;
+                        $matched_product_ids[ $target_id ] = true;
+                    }
+                }
+            }
+
+            $total_pages = (int) ( $ty_res['totalPages'] ?? 0 );
+            if ( $page + 1 >= $total_pages ) {
+                break;
+            }
+        }
+
+        // 2. Also find WooCommerce products marked as not approved
+        $local_unapproved = get_posts( [
+            'post_type'      => 'product',
+            'post_status'    => 'publish',
+            'posts_per_page' => -1,
+            'fields'         => 'ids',
+            'meta_query'     => [
+                'relation' => 'AND',
+                [
+                    'key'     => '_trendyol_sent',
+                    'value'   => 'yes',
+                    'compare' => '=',
+                ],
+                [
+                    'key'     => '_trendyol_approved',
+                    'value'   => 'yes',
+                    'compare' => '!=',
+                ],
+            ],
+        ] );
+
+        foreach ( $local_unapproved as $l_id ) {
+            $matched_product_ids[ $l_id ] = true;
+        }
+
+        // Filter valid mappings
+        $final_ids     = [];
+        $omitted_count = 0;
+
+        foreach ( array_keys( $matched_product_ids ) as $pid ) {
+            $product = wc_get_product( $pid );
+            if ( ! $product || ! $this->product_creator->validate_mapping( $product ) ) {
+                $omitted_count++;
+                continue;
+            }
+            $final_ids[] = (int) $pid;
+        }
+
+        wp_send_json_success( [
+            'product_ids'   => $final_ids,
+            'omitted_count' => $omitted_count,
+            'message'       => sprintf(
+                __( 'Found %1$d unapproved products to update (%2$d omitted due to invalid mapping).', 'woo-trendyol' ),
+                count( $final_ids ),
+                $omitted_count
+            ),
+        ] );
+    }
+
+    /**
+     * Handle AJAX request to push an unapproved update batch to Trendyol.
+     *
+     * Action: wp_ajax_trendyol_bulk_update_unapproved_batch
+     *
+     * @since 1.0.0
+     */
+    public function ajax_bulk_update_unapproved_batch(): void {
+        check_ajax_referer( 'woo_trendyol_admin', 'nonce' );
+
+        if ( ! current_user_can( 'manage_woocommerce' ) ) {
+            wp_send_json_error( [ 'message' => __( 'Permission denied.', 'woo-trendyol' ) ] );
+        }
+
+        $raw_ids = isset( $_POST['product_ids'] )
+            ? json_decode( sanitize_text_field( wp_unslash( $_POST['product_ids'] ) ), true )
+            : [];
+
+        if ( empty( $raw_ids ) || ! is_array( $raw_ids ) ) {
+            wp_send_json_error( [ 'message' => __( 'No product IDs provided.', 'woo-trendyol' ) ] );
+        }
+
+        $product_ids = array_map( 'absint', $raw_ids );
+        $result      = $this->product_creator->update_unapproved_products( $product_ids, true );
 
         if ( is_wp_error( $result ) ) {
             wp_send_json_error( [ 'message' => $result->get_error_message() ] );
@@ -2368,11 +2721,20 @@ class Woo_Trendyol_Admin {
         }
 
         // --- Validate prerequisites ---
-        $barcode = $this->product_creator->resolve_barcode( $product );
-        if ( empty( $barcode ) ) {
-            wp_send_json_error( [
-                'message' => __( 'Product has no barcode. Please add a barcode before sending to Trendyol.', 'woo-trendyol' ),
-            ] );
+        if ( $product->is_type( 'variable' ) ) {
+            $children = $product->get_children();
+            if ( empty( $children ) ) {
+                wp_send_json_error( [
+                    'message' => __( 'Variable product has no variations. Please add variations before sending to Trendyol.', 'woo-trendyol' ),
+                ] );
+            }
+        } else {
+            $barcode = $this->product_creator->resolve_barcode( $product );
+            if ( empty( $barcode ) ) {
+                wp_send_json_error( [
+                    'message' => __( 'Product has no barcode. Please add a barcode before sending to Trendyol.', 'woo-trendyol' ),
+                ] );
+            }
         }
 
         $category_id = $this->category_helper->get_trendyol_category_id( $post_id );
@@ -2420,13 +2782,23 @@ class Woo_Trendyol_Admin {
 
                 if ( in_array( $batch_status, [ 'COMPLETED', 'FAILED' ], true ) ) {
                     $items = $batch_response['items'] ?? [];
+                    $has_failure = false;
+                    $reasons = [];
                     foreach ( $items as $item ) {
-                        $item_status = $item['status'] ?? 'UNKNOWN';
-                        if ( ! empty( $item['failureReasons'] ) ) {
-                            $reasons     = array_column( $item['failureReasons'], 'message' );
-                            $fail_reason = implode( '; ', $reasons );
+                        $st = $item['status'] ?? 'UNKNOWN';
+                        if ( in_array( $st, [ 'ERROR', 'FAILED' ], true ) || ! empty( $item['failureReasons'] ) ) {
+                            $has_failure = true;
+                            if ( ! empty( $item['failureReasons'] ) ) {
+                                $r = array_column( $item['failureReasons'], 'message' );
+                                $reasons = array_merge( $reasons, $r );
+                            }
                         }
-                        break; // Only one product in this batch.
+                    }
+                    if ( $has_failure ) {
+                        $item_status = 'FAILED';
+                        $fail_reason = implode( '; ', array_unique( $reasons ) );
+                    } else {
+                        $item_status = 'SUCCESS';
                     }
                     break;
                 }
@@ -2448,19 +2820,84 @@ class Woo_Trendyol_Admin {
 
         update_post_meta( $post_id, '_trendyol_last_sync', time() );
 
-        // --- Fetch live Trendyol record to update approval flags ---
-        $trendyol_product = $this->api->get_product_base( $barcode );
+        // --- Fetch live Trendyol records to update approval flags ---
+        if ( $product->is_type( 'variable' ) ) {
+            $all_approved    = true;
+            $any_approved    = false;
+            $any_on_sale     = false;
+            $any_archived    = false;
+            $all_archived    = true;
+            $any_blacklisted = false;
+            $has_val_count   = 0;
 
-        if ( ! is_wp_error( $trendyol_product ) ) {
-            $approved    = $trendyol_product['approved']    ?? null;
-            $on_sale     = $trendyol_product['onSale']      ?? null;
-            $archived    = $trendyol_product['archived']    ?? null;
-            $blacklisted = $trendyol_product['blacklisted'] ?? null;
+            foreach ( $product->get_children() as $cid ) {
+                $child = wc_get_product( $cid );
+                if ( ! $child || 'trash' === $child->get_status() ) {
+                    continue;
+                }
 
-            if ( null !== $approved )    update_post_meta( $post_id, '_trendyol_approved',    $approved    ? 'yes' : 'no' );
-            if ( null !== $on_sale )     update_post_meta( $post_id, '_trendyol_on_sale',     $on_sale     ? 'yes' : 'no' );
-            if ( null !== $archived )    update_post_meta( $post_id, '_trendyol_archived',    $archived    ? 'yes' : 'no' );
-            if ( null !== $blacklisted ) update_post_meta( $post_id, '_trendyol_blacklisted', $blacklisted ? 'yes' : 'no' );
+                if ( 'SUCCESS' === $item_status ) {
+                    update_post_meta( $cid, '_trendyol_sent',        'yes' );
+                    update_post_meta( $cid, '_trendyol_sync_status', 'success' );
+                    update_post_meta( $cid, '_trendyol_sync_error',  '' );
+                    update_post_meta( $cid, '_trendyol_last_sync',   time() );
+                }
+
+                $child_barcode = $this->product_creator->resolve_barcode( $child );
+                if ( empty( $child_barcode ) ) {
+                    continue;
+                }
+
+                $var_trendyol = $this->api->get_product_base( $child_barcode );
+                if ( ! is_wp_error( $var_trendyol ) ) {
+                    $v_approved    = $var_trendyol['approved']    ?? null;
+                    $v_on_sale     = $var_trendyol['onSale']      ?? null;
+                    $v_archived    = $var_trendyol['archived']    ?? null;
+                    $v_blacklisted = $var_trendyol['blacklisted'] ?? null;
+
+                    if ( null !== $v_approved ) {
+                        update_post_meta( $cid, '_trendyol_approved', $v_approved ? 'yes' : 'no' );
+                        $has_val_count++;
+                        if ( $v_approved ) { $any_approved = true; } else { $all_approved = false; }
+                    } else {
+                        $all_approved = false;
+                    }
+                    if ( null !== $v_on_sale ) {
+                        update_post_meta( $cid, '_trendyol_on_sale', $v_on_sale ? 'yes' : 'no' );
+                        if ( $v_on_sale ) { $any_on_sale = true; }
+                    }
+                    if ( null !== $v_archived ) {
+                        update_post_meta( $cid, '_trendyol_archived', $v_archived ? 'yes' : 'no' );
+                        if ( $v_archived ) { $any_archived = true; } else { $all_archived = false; }
+                    }
+                    if ( null !== $v_blacklisted ) {
+                        update_post_meta( $cid, '_trendyol_blacklisted', $v_blacklisted ? 'yes' : 'no' );
+                        if ( $v_blacklisted ) { $any_blacklisted = true; }
+                    }
+                }
+            }
+
+            if ( $has_val_count > 0 ) {
+                update_post_meta( $post_id, '_trendyol_approved',    ( $all_approved && $any_approved ) ? 'yes' : ( $any_approved ? 'partial' : 'no' ) );
+                update_post_meta( $post_id, '_trendyol_on_sale',     $any_on_sale ? 'yes' : 'no' );
+                update_post_meta( $post_id, '_trendyol_archived',    ( $all_archived && $has_val_count > 0 ) ? 'yes' : ( $any_archived ? 'partial' : 'no' ) );
+                update_post_meta( $post_id, '_trendyol_blacklisted', $any_blacklisted ? 'yes' : 'no' );
+            }
+        } else {
+            $lookup_barcode = $this->product_creator->resolve_barcode( $product );
+            $trendyol_product = ! empty( $lookup_barcode ) ? $this->api->get_product_base( $lookup_barcode ) : new WP_Error( 'no_barcode', 'No barcode' );
+
+            if ( ! is_wp_error( $trendyol_product ) ) {
+                $approved    = $trendyol_product['approved']    ?? null;
+                $on_sale     = $trendyol_product['onSale']      ?? null;
+                $archived    = $trendyol_product['archived']    ?? null;
+                $blacklisted = $trendyol_product['blacklisted'] ?? null;
+
+                if ( null !== $approved )    update_post_meta( $post_id, '_trendyol_approved',    $approved    ? 'yes' : 'no' );
+                if ( null !== $on_sale )     update_post_meta( $post_id, '_trendyol_on_sale',     $on_sale     ? 'yes' : 'no' );
+                if ( null !== $archived )    update_post_meta( $post_id, '_trendyol_archived',    $archived    ? 'yes' : 'no' );
+                if ( null !== $blacklisted ) update_post_meta( $post_id, '_trendyol_blacklisted', $blacklisted ? 'yes' : 'no' );
+            }
         }
 
         // --- Build response ---

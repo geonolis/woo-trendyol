@@ -15,13 +15,16 @@ if ( ! defined( 'WPINC' ) ) {
 /**
  * Class Woo_Trendyol_Product_Sync
  *
- * Listens to WooCommerce product save and attachment update hooks and pushes
- * the relevant changes to Trendyol via the API client.
+ * Listens to WooCommerce product save, stock changes, order stock reduction,
+ * and attachment update hooks and pushes the relevant changes to Trendyol via the API client.
  *
  * Hook responsibilities:
- *  - on_product_saved()       — fires after any product save; syncs price + stock
- *  - on_post_meta_updated()   — fires when _price/_stock meta changes; triggers sync
- *  - on_attachment_updated()  — fires when a media attachment is updated; syncs images
+ *  - on_product_saved()         — fires after any product save; syncs price + stock
+ *  - on_post_meta_updated()     — fires when _price/_stock meta changes; triggers sync
+ *  - on_product_stock_set()     — fires on woocommerce_product_set_stock / woocommerce_variation_set_stock
+ *  - on_order_stock_reduced()   — fires on woocommerce_reduce_order_stock; syncs all order items
+ *  - on_order_stock_restored()  — fires on woocommerce_restore_order_stock; syncs all restored order items
+ *  - on_attachment_updated()    — fires when a media attachment is updated; syncs images
  *
  * @since      1.0.0
  * @package    Woo_Trendyol
@@ -75,6 +78,15 @@ class Woo_Trendyol_Product_Sync {
     private Woo_Trendyol_Category_Helper $category_helper;
 
     /**
+     * Product creator — handles barcode resolution and payload building.
+     *
+     * @since  1.0.0
+     * @access private
+     * @var    Woo_Trendyol_Product_Creator $product_creator
+     */
+    private Woo_Trendyol_Product_Creator $product_creator;
+
+    /**
      * Post meta keys that trigger a price/stock sync when changed.
      *
      * @since  1.0.0
@@ -103,19 +115,22 @@ class Woo_Trendyol_Product_Sync {
      * @param Woo_Trendyol_API_Client        $api             Shared API client.
      * @param Woo_Trendyol_Logger            $logger          Shared logger.
      * @param Woo_Trendyol_Category_Helper   $category_helper Category resolution helper.
+     * @param Woo_Trendyol_Product_Creator   $product_creator Product creator for barcode resolution.
      */
     public function __construct(
         string $plugin_name,
         string $version,
         Woo_Trendyol_API_Client $api,
         Woo_Trendyol_Logger $logger,
-        Woo_Trendyol_Category_Helper $category_helper
+        Woo_Trendyol_Category_Helper $category_helper,
+        Woo_Trendyol_Product_Creator $product_creator
     ) {
         $this->plugin_name     = $plugin_name;
         $this->version         = $version;
         $this->api             = $api;
         $this->logger          = $logger;
         $this->category_helper = $category_helper;
+        $this->product_creator = $product_creator;
     }
 
     // -----------------------------------------------------------------------
@@ -217,6 +232,104 @@ class Woo_Trendyol_Product_Sync {
     }
 
     /**
+     * Sync stock for all products in an order after WooCommerce reduces order stock.
+     *
+     * Hooked to: woocommerce_reduce_order_stock
+     *
+     * @since 1.0.0
+     * @param WC_Order|int $order Order object or order ID.
+     */
+    public function on_order_stock_reduced( WC_Order|int $order ): void {
+        if ( ! $this->api->is_active() ) {
+            return;
+        }
+
+        $this->sync_order_items_stock( $order );
+    }
+
+    /**
+     * Sync stock for all products in an order after WooCommerce restores order stock.
+     *
+     * Hooked to: woocommerce_restore_order_stock
+     *
+     * @since 1.0.0
+     * @param WC_Order|int $order Order object or order ID.
+     */
+    public function on_order_stock_restored( WC_Order|int $order ): void {
+        if ( ! $this->api->is_active() ) {
+            return;
+        }
+
+        $this->sync_order_items_stock( $order );
+    }
+
+    /**
+     * Push current stock levels of all products in an order to Trendyol in a single batch.
+     *
+     * @since 1.0.0
+     * @param WC_Order|int $order Order object or ID.
+     */
+    public function sync_order_items_stock( WC_Order|int $order ): void {
+        if ( is_numeric( $order ) ) {
+            $order = wc_get_order( $order );
+        }
+
+        if ( ! $order instanceof WC_Order ) {
+            return;
+        }
+
+        $items      = [];
+        $synced_ids = [];
+
+        foreach ( $order->get_items() as $item ) {
+            if ( ! $item instanceof WC_Order_Item_Product ) {
+                continue;
+            }
+
+            $product = $item->get_product();
+            if ( ! $product ) {
+                continue;
+            }
+
+            $product_id = $product->get_id();
+            if ( in_array( $product_id, $synced_ids, true ) ) {
+                continue;
+            }
+            $synced_ids[] = $product_id;
+
+            $stock_item = $this->build_price_stock_item( $product );
+            if ( $stock_item ) {
+                $items[] = $stock_item;
+            }
+        }
+
+        if ( empty( $items ) ) {
+            return;
+        }
+
+        $response = $this->api->update_price_and_stock( $items );
+        if ( is_wp_error( $response ) ) {
+            $this->logger->error(
+                sprintf(
+                    'Order #%d stock sync failed: %s',
+                    $order->get_id(),
+                    $response->get_error_message()
+                )
+            );
+        } else {
+            $batch_id = $response['batchRequestId'] ?? '';
+            $this->logger->info(
+                sprintf(
+                    'Order #%d stock synced to Trendyol (%d item(s)). Batch: %s',
+                    $order->get_id(),
+                    count( $items ),
+                    $batch_id
+                )
+            );
+        }
+    }
+
+    /**
      * Sync product images when a media attachment is updated.
      *
      * Hooked to: edit_attachment
@@ -265,11 +378,11 @@ class Woo_Trendyol_Product_Sync {
         $items = [];
 
         if ( $product->is_type( 'variable' ) ) {
-            // Sync all published variations.
+            // Sync all active variations.
             /** @var WC_Product_Variable $product */
             foreach ( $product->get_children() as $variation_id ) {
                 $variation = wc_get_product( $variation_id );
-                if ( $variation && 'publish' === $variation->get_status() ) {
+                if ( $variation && 'trash' !== $variation->get_status() ) {
                     $item = $this->build_price_stock_item( $variation );
                     if ( $item ) {
                         $items[] = $item;
@@ -277,7 +390,7 @@ class Woo_Trendyol_Product_Sync {
                 }
             }
         } else {
-            // Simple / external / grouped product.
+            // Simple / external / variation product.
             $item = $this->build_price_stock_item( $product );
             if ( $item ) {
                 $items[] = $item;
@@ -286,7 +399,7 @@ class Woo_Trendyol_Product_Sync {
 
         if ( empty( $items ) ) {
             $this->logger->warning(
-                sprintf( 'Product ID %d has no syncable items (missing SKU?).', $product->get_id() )
+                sprintf( 'Product ID %d has no syncable items (missing barcode/SKU?).', $product->get_id() )
             );
             return;
         }
@@ -306,11 +419,16 @@ class Woo_Trendyol_Product_Sync {
         $this->write_sync_meta( $product->get_id(), 'success', '', $batch_id );
 
         // Store the last synced values for display in the meta box.
+        $parent = $product->is_type( 'variation' ) ? wc_get_product( $product->get_parent_id() ) : null;
+        $stock_display = $product->managing_stock()
+            ? $product->get_stock_quantity()
+            : ( ( $parent && $parent->managing_stock() ) ? $parent->get_stock_quantity() : 'N/A' );
+
         update_post_meta( $product->get_id(), '_trendyol_last_price', $product->get_price() );
         update_post_meta(
             $product->get_id(),
             '_trendyol_last_stock',
-            $product->managing_stock() ? $product->get_stock_quantity() : 'N/A'
+            $stock_display
         );
 
         $this->logger->info(
@@ -325,8 +443,8 @@ class Woo_Trendyol_Product_Sync {
      * @param WC_Product $product The product to sync images for.
      */
     public function sync_images( WC_Product $product ): void {
-        $sku = $product->get_sku();
-        if ( empty( $sku ) ) {
+        $barcode = $this->product_creator->resolve_barcode( $product );
+        if ( empty( $barcode ) ) {
             return;
         }
 
@@ -337,7 +455,7 @@ class Woo_Trendyol_Product_Sync {
 
         $response = $this->api->update_product_images( [
             [
-                'barcode' => $sku,
+                'barcode' => $barcode,
                 'images'  => $images,
             ],
         ] );
@@ -361,19 +479,19 @@ class Woo_Trendyol_Product_Sync {
     /**
      * Build a single price/stock item array for the Trendyol API payload.
      *
-     * Returns null when the product has no SKU (barcode), as Trendyol requires
-     * a barcode to identify the product.
+     * Resolves barcode using the configured barcode source (global_unique_id,
+     * custom meta, attribute, or SKU fallback).
      *
      * For variations, the category lookup walks up to the parent product.
      *
      * @since  1.0.0
      * @access private
      * @param  WC_Product $product Product or variation.
-     * @return array|null  Item array, or null if SKU is missing.
+     * @return array|null  Item array, or null if barcode is missing.
      */
     private function build_price_stock_item( WC_Product $product ): ?array {
-        $sku = $product->get_sku();
-        if ( empty( $sku ) ) {
+        $barcode = $this->product_creator->resolve_barcode( $product );
+        if ( empty( $barcode ) ) {
             return null;
         }
 
@@ -382,9 +500,12 @@ class Woo_Trendyol_Product_Sync {
         $sale_price = $prices['salePrice'];
 
         // Determine stock quantity.
+        $parent   = $product->is_type( 'variation' ) ? wc_get_product( $product->get_parent_id() ) : null;
         $quantity = $product->managing_stock()
             ? max( 0, (int) $product->get_stock_quantity() )
-            : ( $product->is_in_stock() ? 999 : 0 );
+            : ( ( $parent && $parent->managing_stock() )
+                ? max( 0, (int) $parent->get_stock_quantity() )
+                : ( $product->is_in_stock() ? 100 : 0 ) );
 
         // Resolve the Trendyol category ID.
         // For variations, walk up to the parent product for the category lookup.
@@ -394,7 +515,7 @@ class Woo_Trendyol_Product_Sync {
         $category_id = $this->category_helper->get_trendyol_category_id( $lookup_id );
 
         $item = [
-            'barcode'   => $sku,
+            'barcode'   => $barcode,
             'quantity'  => $quantity,
             'salePrice' => $sale_price,
             'listPrice' => $list_price,

@@ -373,6 +373,10 @@ $tabs = [
                     </div>
                     <p id="wt-bulk-progress-text" class="wt-progress-label">0 / 0</p>
                     <div id="wt-bulk-current-ids" style="font-size: 11px; color: #666; margin-top: 4px; text-align: center;"></div>
+                    <p class="wt-keep-tab-open-notice" style="margin-top:6px; font-size:12px; color:#b32d2e; font-weight:500; text-align:center;">
+                        <span class="dashicons dashicons-warning" style="font-size:14px; width:14px; height:14px; vertical-align:-2px;"></span>
+                        <?php esc_html_e( 'Please keep this browser tab open until the process finishes.', 'woo-trendyol' ); ?>
+                    </p>
                 </div>
 
                 <!-- Final totals (shown when complete) -->
@@ -399,8 +403,18 @@ $tabs = [
 
                 <!-- Per-batch results log -->
                 <div id="wt-bulk-results" class="wt-bulk-results" style="display:none; margin-top:8px;">
-                    <h4><?php esc_html_e( 'Push Log', 'woo-trendyol' ); ?></h4>
-                    <div id="wt-bulk-results-list" style="max-height:180px; overflow-y:auto;"></div>
+                    <div class="wt-log-header">
+                        <h4><?php esc_html_e( 'Push Log', 'woo-trendyol' ); ?></h4>
+                        <div class="wt-log-actions">
+                            <button type="button" class="button button-small wt-copy-log-btn" data-target="#wt-bulk-results-list">
+                                <span class="dashicons dashicons-clipboard"></span> <?php esc_html_e( 'Copy Log', 'woo-trendyol' ); ?>
+                            </button>
+                            <button type="button" class="button button-small wt-download-log-btn" data-target="#wt-bulk-results-list" data-filename="trendyol-bulk-push-log.txt">
+                                <span class="dashicons dashicons-download"></span> <?php esc_html_e( 'Download (.txt)', 'woo-trendyol' ); ?>
+                            </button>
+                        </div>
+                    </div>
+                    <div id="wt-bulk-results-list" class="wt-log-box" style="max-height:220px; overflow-y:auto;"></div>
                 </div>
             </div>
 
@@ -446,12 +460,87 @@ $tabs = [
                     </div>
                     <p id="wt-sync-progress-text" class="wt-progress-label">0 / 0</p>
                     <div id="wt-sync-current-ids" style="font-size: 11px; color: #666; margin-top: 4px; text-align: center;"></div>
+                    <p class="wt-keep-tab-open-notice" style="margin-top:6px; font-size:12px; color:#b32d2e; font-weight:500; text-align:center;">
+                        <span class="dashicons dashicons-warning" style="font-size:14px; width:14px; height:14px; vertical-align:-2px;"></span>
+                        <?php esc_html_e( 'Please keep this browser tab open until the process finishes.', 'woo-trendyol' ); ?>
+                    </p>
                 </div>
 
                 <!-- Per-batch results log -->
                 <div id="wt-sync-results" class="wt-bulk-results" style="display:none; margin-top:8px;">
-                    <h4><?php esc_html_e( 'Sync Log', 'woo-trendyol' ); ?></h4>
-                    <div id="wt-sync-results-list" style="max-height:180px; overflow-y:auto;"></div>
+                    <div class="wt-log-header">
+                        <h4><?php esc_html_e( 'Sync Log', 'woo-trendyol' ); ?></h4>
+                        <div class="wt-log-actions">
+                            <button type="button" class="button button-small wt-copy-log-btn" data-target="#wt-sync-results-list">
+                                <span class="dashicons dashicons-clipboard"></span> <?php esc_html_e( 'Copy Log', 'woo-trendyol' ); ?>
+                            </button>
+                            <button type="button" class="button button-small wt-download-log-btn" data-target="#wt-sync-results-list" data-filename="trendyol-price-stock-sync-log.txt">
+                                <span class="dashicons dashicons-download"></span> <?php esc_html_e( 'Download (.txt)', 'woo-trendyol' ); ?>
+                            </button>
+                        </div>
+                    </div>
+                    <div id="wt-sync-results-list" class="wt-log-box" style="max-height:220px; overflow-y:auto;"></div>
+                </div>
+            </div>
+
+            <!-- Update Unapproved Products Tool -->
+            <div class="wt-card wt-card--unapproved-push">
+                <h3><?php esc_html_e( 'Update Unapproved Products', 'woo-trendyol' ); ?></h3>
+                <p class="description">
+                    <?php esc_html_e( 'Update content, images, and attributes for products currently on unapproved status in Trendyol using the unapproved-bulk-update API.', 'woo-trendyol' ); ?>
+                </p>
+
+                <!-- Action buttons row -->
+                <div class="wt-bulk-action-row">
+                    <button type="button" id="wt-unapproved-push" class="button button-primary">
+                        <span class="dashicons dashicons-update"></span>
+                        <?php esc_html_e( 'Update Unapproved Products', 'woo-trendyol' ); ?>
+                    </button>
+                    <button type="button" id="wt-unapproved-pause" class="button" style="display:none;">
+                        <span class="dashicons dashicons-controls-pause"></span>
+                        <?php esc_html_e( 'Pause', 'woo-trendyol' ); ?>
+                    </button>
+                    <button type="button" id="wt-unapproved-resume" class="button button-primary" style="display:none;">
+                        <span class="dashicons dashicons-controls-play"></span>
+                        <?php esc_html_e( 'Resume', 'woo-trendyol' ); ?>
+                    </button>
+                    <button type="button" id="wt-unapproved-cancel" class="button button-secondary" style="display:none;">
+                        <span class="dashicons dashicons-no-alt"></span>
+                        <?php esc_html_e( 'Cancel', 'woo-trendyol' ); ?>
+                    </button>
+                    <span class="spinner" id="wt-unapproved-spinner" style="float:none;"></span>
+                </div>
+
+                <!-- Progress bar -->
+                <div id="wt-unapproved-progress-wrap" style="display:none; margin-top:10px;">
+                    <div class="wt-progress-bar-track">
+                        <div class="wt-progress-bar-fill" id="wt-unapproved-progress-fill" style="width:0%"></div>
+                    </div>
+                    <p id="wt-unapproved-progress-text" class="wt-progress-label">0 / 0</p>
+                    <div id="wt-unapproved-current-ids" style="font-size: 11px; color: #666; margin-top: 4px; text-align: center;"></div>
+                    <p class="wt-keep-tab-open-notice" style="margin-top:6px; font-size:12px; color:#b32d2e; font-weight:500; text-align:center;">
+                        <span class="dashicons dashicons-warning" style="font-size:14px; width:14px; height:14px; vertical-align:-2px;"></span>
+                        <?php esc_html_e( 'Please keep this browser tab open until the process finishes.', 'woo-trendyol' ); ?>
+                    </p>
+                </div>
+
+                <!-- Final totals -->
+                <div id="wt-unapproved-totals" style="display:none; margin-top:8px;"></div>
+
+                <!-- Per-batch results log -->
+                <div id="wt-unapproved-results" class="wt-bulk-results" style="display:none; margin-top:8px;">
+                    <div class="wt-log-header">
+                        <h4><?php esc_html_e( 'Unapproved Update Log', 'woo-trendyol' ); ?></h4>
+                        <div class="wt-log-actions">
+                            <button type="button" class="button button-small wt-copy-log-btn" data-target="#wt-unapproved-results-list">
+                                <span class="dashicons dashicons-clipboard"></span> <?php esc_html_e( 'Copy Log', 'woo-trendyol' ); ?>
+                            </button>
+                            <button type="button" class="button button-small wt-download-log-btn" data-target="#wt-unapproved-results-list" data-filename="trendyol-unapproved-update-log.txt">
+                                <span class="dashicons dashicons-download"></span> <?php esc_html_e( 'Download (.txt)', 'woo-trendyol' ); ?>
+                            </button>
+                        </div>
+                    </div>
+                    <div id="wt-unapproved-results-list" class="wt-log-box" style="max-height:220px; overflow-y:auto;"></div>
                 </div>
             </div>
 

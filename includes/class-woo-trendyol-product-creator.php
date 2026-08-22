@@ -155,20 +155,47 @@ class Woo_Trendyol_Product_Creator {
 
         $to_create = [];
         $to_update = [];
-        foreach ( $product_ids as $pid ) {
-            if ( 'yes' === get_post_meta( $pid, '_trendyol_sent', true ) ) {
-                $to_update[] = $pid;
-            } else {
-                $to_create[] = $pid;
-            }
-        }
-
         $result = [
             'submitted' => 0,
             'skipped'   => 0,
             'batches'   => [],
             'errors'    => [],
         ];
+
+        foreach ( $product_ids as $pid ) {
+            $product = wc_get_product( $pid );
+            if ( ! $product ) {
+                $result['skipped']++;
+                $result['errors'][ $pid ] = __( 'Product not found.', 'woo-trendyol' );
+                continue;
+            }
+
+            if ( $product->is_type( 'variable' ) ) {
+                $children = $product->get_children();
+                if ( empty( $children ) ) {
+                    $result['skipped']++;
+                    $result['errors'][ $pid ] = __( 'Variable product has no variations.', 'woo-trendyol' );
+                    continue;
+                }
+                foreach ( $children as $child_id ) {
+                    $child = wc_get_product( $child_id );
+                    if ( ! $child || ( 'publish' !== $child->get_status() && 'publish' !== get_post_status( $child_id ) ) ) {
+                        continue;
+                    }
+                    if ( 'yes' === get_post_meta( $child_id, '_trendyol_sent', true ) || 'yes' === get_post_meta( $pid, '_trendyol_sent', true ) ) {
+                        $to_update[] = $child_id;
+                    } else {
+                        $to_create[] = $child_id;
+                    }
+                }
+            } else {
+                if ( 'yes' === get_post_meta( $pid, '_trendyol_sent', true ) ) {
+                    $to_update[] = $pid;
+                } else {
+                    $to_create[] = $pid;
+                }
+            }
+        }
 
         if ( ! empty( $to_create ) ) {
             $create_res = $this->create_products_batch( $to_create, $is_bulk );
@@ -205,22 +232,61 @@ class Woo_Trendyol_Product_Creator {
      * @return bool True if mapped, false otherwise.
      */
     public function validate_mapping( WC_Product $product ): bool {
+        if ( $product->is_type( 'variable' ) ) {
+            $children = $product->get_children();
+            if ( empty( $children ) ) {
+                return false;
+            }
+            $category_id = (int) $this->category_helper->get_trendyol_category_id( $product->get_id() );
+            if ( ! $category_id ) {
+                return false;
+            }
+            $brand_id = $this->resolve_brand_id( $product );
+            if ( ! $brand_id ) {
+                return false;
+            }
+            $has_valid_child = false;
+            foreach ( $children as $child_id ) {
+                $child = wc_get_product( $child_id );
+                if ( $child && ( 'publish' === $child->get_status() || 'publish' === get_post_status( $child_id ) ) ) {
+                    if ( $this->validate_mapping( $child ) ) {
+                        $has_valid_child = true;
+                        break;
+                    }
+                }
+            }
+            return $has_valid_child;
+        }
+
         $product_id = $product->get_id();
+        $parent_id  = $product->get_parent_id();
 
         // Check category mapping
         $category_id = (int) $this->category_helper->get_trendyol_category_id( $product_id );
+        if ( ! $category_id && $parent_id ) {
+            $category_id = (int) $this->category_helper->get_trendyol_category_id( $parent_id );
+        }
         if ( ! $category_id ) {
             return false;
         }
 
         // Check brand mapping
         $brand_id = $this->resolve_brand_id( $product );
+        if ( ! $brand_id && $parent_id ) {
+            $parent = wc_get_product( $parent_id );
+            if ( $parent ) {
+                $brand_id = $this->resolve_brand_id( $parent );
+            }
+        }
         if ( ! $brand_id ) {
             return false;
         }
 
         // Check required attributes
         $terms   = get_the_terms( $product_id, 'product_cat' );
+        if ( ( empty( $terms ) || is_wp_error( $terms ) ) && $parent_id ) {
+            $terms = get_the_terms( $parent_id, 'product_cat' );
+        }
         $term_id = 0;
         if ( $terms && ! is_wp_error( $terms ) ) {
             foreach ( $terms as $term ) {
@@ -240,6 +306,148 @@ class Woo_Trendyol_Product_Creator {
         }
 
         return true;
+    }
+
+    /**
+     * Update unapproved products on Trendyol using unapproved-bulk-update.
+     *
+     * Endpoint: POST /product/sellers/{sellerId}/products/unapproved-bulk-update
+     *
+     * @since 1.0.0
+     * @param array $product_ids Array of WooCommerce product IDs (simple, variable, or variation).
+     * @param bool  $is_bulk     Whether this is part of a bulk operation.
+     * @return array Result summary.
+     */
+    public function update_unapproved_products( array $product_ids, bool $is_bulk = false ): array {
+        $result = [
+            'submitted' => 0,
+            'skipped'   => 0,
+            'batches'   => [],
+            'errors'    => [],
+        ];
+
+        if ( ! $this->api->is_active() ) {
+            $result['errors'][0] = __( 'Trendyol integration is not active. Please enable it in settings.', 'woo-trendyol' );
+            return $result;
+        }
+
+        $unapproved_items  = [];
+        $barcode_map       = [];
+
+        // Flatten variable products into variations
+        $flat_ids = [];
+        foreach ( $product_ids as $pid ) {
+            $prod = wc_get_product( $pid );
+            if ( ! $prod ) {
+                $result['skipped']++;
+                $result['errors'][ $pid ] = __( 'Product not found.', 'woo-trendyol' );
+                continue;
+            }
+            if ( $prod->is_type( 'variable' ) ) {
+                $children = $prod->get_children();
+                if ( empty( $children ) ) {
+                    $result['skipped']++;
+                    $result['errors'][ $pid ] = __( 'Variable product has no variations.', 'woo-trendyol' );
+                    continue;
+                }
+                foreach ( $children as $cid ) {
+                    $child = wc_get_product( $cid );
+                    if ( $child && 'trash' !== $child->get_status() ) {
+                        $flat_ids[] = $cid;
+                    }
+                }
+            } else {
+                $flat_ids[] = $pid;
+            }
+        }
+
+        foreach ( $flat_ids as $item_id ) {
+            $product = wc_get_product( $item_id );
+            if ( ! $product ) {
+                $result['skipped']++;
+                $result['errors'][ $item_id ] = __( 'Product not found.', 'woo-trendyol' );
+                continue;
+            }
+
+            $barcode = $this->resolve_barcode( $product );
+            if ( empty( $barcode ) ) {
+                $result['skipped']++;
+                $result['errors'][ $item_id ] = __( 'Product has no barcode.', 'woo-trendyol' );
+                continue;
+            }
+
+            $payload = $this->build_payload( $product, $is_bulk );
+            if ( is_wp_error( $payload ) ) {
+                $result['skipped']++;
+                $result['errors'][ $item_id ] = $payload->get_error_message();
+                continue;
+            }
+
+            $unapproved_items[] = [
+                'barcode'           => $barcode,
+                'title'             => $payload['title'],
+                'description'       => $payload['description'],
+                'productMainId'     => $payload['productMainId'] ?? '',
+                'brandId'           => $payload['brandId'] ?? 0,
+                'categoryId'        => $payload['categoryId'] ?? 0,
+                'stockCode'         => $payload['stockCode'] ?? $barcode,
+                'vatRate'           => $payload['vatRate'] ?? 0,
+                'dimensionalWeight' => $payload['dimensionalWeight'] ?? 1,
+                'images'            => $payload['images'],
+                'attributes'        => $payload['attributes'],
+            ];
+            $barcode_map[ $barcode ] = $item_id;
+        }
+
+        if ( empty( $unapproved_items ) ) {
+            return $result;
+        }
+
+        // Chunk in batches of 100
+        $chunks = array_chunk( $unapproved_items, 100 );
+
+        foreach ( $chunks as $chunk ) {
+            $response = $this->api->update_unapproved_product_content( $chunk );
+
+            if ( is_wp_error( $response ) ) {
+                $error_msg = $response->get_error_message();
+                foreach ( $chunk as $item ) {
+                    $pid = $barcode_map[ $item['barcode'] ] ?? null;
+                    if ( $pid ) {
+                        $result['errors'][ $pid ] = $error_msg;
+                        $result['skipped']++;
+                        update_post_meta( $pid, '_trendyol_sync_status', 'error' );
+                        update_post_meta( $pid, '_trendyol_sync_error',  $error_msg );
+                    }
+                }
+            } else {
+                $batch_id = $response['batchRequestId'] ?? '';
+                if ( ! empty( $batch_id ) ) {
+                    $result['batches'][] = $batch_id;
+                }
+                foreach ( $chunk as $item ) {
+                    $pid = $barcode_map[ $item['barcode'] ] ?? null;
+                    if ( $pid ) {
+                        update_post_meta( $pid, '_trendyol_sent',        'yes' );
+                        update_post_meta( $pid, '_trendyol_batch_id',    $batch_id );
+                        update_post_meta( $pid, '_trendyol_sync_status', 'pending' );
+                        update_post_meta( $pid, '_trendyol_sync_error',  '' );
+                        update_post_meta( $pid, '_trendyol_last_sync',   time() );
+                        $parent_id = wp_get_post_parent_id( $pid );
+                        if ( $parent_id && $parent_id !== $pid ) {
+                            update_post_meta( $parent_id, '_trendyol_sent',        'yes' );
+                            update_post_meta( $parent_id, '_trendyol_batch_id',    $batch_id );
+                            update_post_meta( $parent_id, '_trendyol_sync_status', 'pending' );
+                            update_post_meta( $parent_id, '_trendyol_sync_error',  '' );
+                            update_post_meta( $parent_id, '_trendyol_last_sync',   time() );
+                        }
+                        $result['submitted']++;
+                    }
+                }
+            }
+        }
+
+        return $result;
     }
 
     /**
@@ -383,6 +591,12 @@ class Woo_Trendyol_Product_Creator {
                         $result['skipped']++;
                         update_post_meta( $pid, '_trendyol_sync_status', 'error' );
                         update_post_meta( $pid, '_trendyol_sync_error',  $error_msg );
+                        $parent_id = wp_get_post_parent_id( $pid );
+                        if ( $parent_id && $parent_id !== $pid ) {
+                            $result['errors'][ $parent_id ] = $error_msg;
+                            update_post_meta( $parent_id, '_trendyol_sync_status', 'error' );
+                            update_post_meta( $parent_id, '_trendyol_sync_error',  $error_msg );
+                        }
                     }
                 }
                 continue;
@@ -405,6 +619,14 @@ class Woo_Trendyol_Product_Creator {
                     update_post_meta( $pid, '_trendyol_sync_status', 'pending' );
                     update_post_meta( $pid, '_trendyol_sync_error',  '' );
                     update_post_meta( $pid, '_trendyol_last_sync',   time() );
+                    $parent_id = wp_get_post_parent_id( $pid );
+                    if ( $parent_id && $parent_id !== $pid ) {
+                        update_post_meta( $parent_id, '_trendyol_sent',        'yes' );
+                        update_post_meta( $parent_id, '_trendyol_batch_id',    $batch_request_id );
+                        update_post_meta( $parent_id, '_trendyol_sync_status', 'pending' );
+                        update_post_meta( $parent_id, '_trendyol_sync_error',  '' );
+                        update_post_meta( $parent_id, '_trendyol_last_sync',   time() );
+                    }
                     $result['submitted']++;
                 }
             }
@@ -528,6 +750,14 @@ class Woo_Trendyol_Product_Creator {
                         update_post_meta( $pid, '_trendyol_sync_status', 'pending' );
                         update_post_meta( $pid, '_trendyol_sync_error',  '' );
                         update_post_meta( $pid, '_trendyol_last_sync',   time() );
+                        $parent_id = wp_get_post_parent_id( $pid );
+                        if ( $parent_id && $parent_id !== $pid ) {
+                            update_post_meta( $parent_id, '_trendyol_sent',        'yes' );
+                            update_post_meta( $parent_id, '_trendyol_batch_id',    $batch_id );
+                            update_post_meta( $parent_id, '_trendyol_sync_status', 'pending' );
+                            update_post_meta( $parent_id, '_trendyol_sync_error',  '' );
+                            update_post_meta( $parent_id, '_trendyol_last_sync',   time() );
+                        }
                         $result['submitted']++;
                     }
                 }
@@ -559,6 +789,14 @@ class Woo_Trendyol_Product_Creator {
                         update_post_meta( $pid, '_trendyol_sync_status', 'pending' );
                         update_post_meta( $pid, '_trendyol_sync_error',  '' );
                         update_post_meta( $pid, '_trendyol_last_sync',   time() );
+                        $parent_id = wp_get_post_parent_id( $pid );
+                        if ( $parent_id && $parent_id !== $pid ) {
+                            update_post_meta( $parent_id, '_trendyol_sent',        'yes' );
+                            update_post_meta( $parent_id, '_trendyol_batch_id',    $batch_id );
+                            update_post_meta( $parent_id, '_trendyol_sync_status', 'pending' );
+                            update_post_meta( $parent_id, '_trendyol_sync_error',  '' );
+                            update_post_meta( $parent_id, '_trendyol_last_sync',   time() );
+                        }
                         $result['submitted']++;
                     }
                 }
@@ -708,11 +946,29 @@ class Woo_Trendyol_Product_Creator {
      * @return array|WP_Error Complete payload array or WP_Error if validation fails.
      */
     public function build_payload( WC_Product $product, bool $is_bulk = false ): array|WP_Error {
+        if ( $product->is_type( 'variable' ) ) {
+            return new WP_Error(
+                'variable_parent_not_supported',
+                sprintf(
+                    /* translators: %d: product ID */
+                    __( 'Product #%d is a variable parent product and cannot be pushed directly. Its variations should be pushed.', 'woo-trendyol' ),
+                    $product->get_id()
+                )
+            );
+        }
+
         $product_id = $product->get_id();
+        $parent_id  = $product->is_type( 'variation' ) ? $product->get_parent_id() : 0;
+        $parent     = $parent_id ? wc_get_product( $parent_id ) : null;
 
         // ---- Resolve barcode using the configured source ----
         $barcode = $this->resolve_barcode( $product );
-        $sku     = (string) $product->get_sku(); // Keep SKU separately for stockCode / productMainId.
+        $sku     = (string) $product->get_sku(); // Variation or simple product SKU.
+
+        if ( empty( $barcode ) && ! empty( $sku ) ) {
+            $barcode = $sku;
+        }
+
         if ( empty( $barcode ) ) {
             return new WP_Error(
                 'missing_barcode',
@@ -724,8 +980,24 @@ class Woo_Trendyol_Product_Creator {
             );
         }
 
+        // ---- Resolve Trendyol productMainId and stockCode ----
+        // For variations: productMainId must be the parent product SKU (or parent ID if no SKU).
+        // For simple products: productMainId is product SKU (or product ID if no SKU).
+        if ( $product->is_type( 'variation' ) && $parent ) {
+            $parent_sku      = (string) $parent->get_sku();
+            $product_main_id = ! empty( $parent_sku ) ? $parent_sku : (string) $parent_id;
+            $stock_code      = ! empty( $sku ) ? $sku : ( ! empty( $barcode ) ? $barcode : (string) $product_id );
+        } else {
+            $product_main_id = ! empty( $sku ) ? $sku : ( ! empty( $barcode ) ? $barcode : (string) $product_id );
+            $stock_code      = ! empty( $sku ) ? $sku : ( ! empty( $barcode ) ? $barcode : (string) $product_id );
+        }
+
         // ---- Resolve Trendyol category ----
         $category_id = (int) $this->category_helper->get_trendyol_category_id( $product_id );
+        if ( ! $category_id && $parent_id ) {
+            $category_id = (int) $this->category_helper->get_trendyol_category_id( $parent_id );
+        }
+
         if ( ! $category_id ) {
             return new WP_Error(
                 'missing_category',
@@ -739,6 +1011,10 @@ class Woo_Trendyol_Product_Creator {
 
         // ---- Resolve term ID for attribute mapping ----
         $terms   = get_the_terms( $product_id, 'product_cat' );
+        if ( ( empty( $terms ) || is_wp_error( $terms ) ) && $parent_id ) {
+            $terms = get_the_terms( $parent_id, 'product_cat' );
+        }
+
         $term_id = 0;
         if ( $terms && ! is_wp_error( $terms ) ) {
             // Use the deepest term that has a Trendyol mapping.
@@ -788,7 +1064,9 @@ class Woo_Trendyol_Product_Creator {
         // ---- Stock ----
         $quantity = $product->get_manage_stock()
             ? max( 0, (int) $product->get_stock_quantity() )
-            : 100; // Default when stock management is off.
+            : ( ( $parent && $parent->get_manage_stock() )
+                ? max( 0, (int) $parent->get_stock_quantity() )
+                : ( $product->is_in_stock() ? 100 : 0 ) );
 
         // ---- Images ----
         $images = $this->build_image_array( $product );
@@ -805,22 +1083,31 @@ class Woo_Trendyol_Product_Creator {
 
         // ---- Brand ID ----
         $brand_id = $this->resolve_brand_id( $product );
+        if ( ! $brand_id && $parent ) {
+            $brand_id = $this->resolve_brand_id( $parent );
+        }
 
         // ---- Description ----
         $description = $this->build_description( $product );
+        if ( empty( $description ) && $parent ) {
+            $description = $this->build_description( $parent );
+        }
 
         // ---- Handling time ----
         $handling_time = $this->resolve_handling_time( $product );
 
         // ---- Required attributes ----
         $attributes = $this->attribute_mapper->build_attributes( $product, $category_id, $term_id );
-        
+
         if ( is_wp_error( $attributes ) ) {
             return $attributes;
         }
 
         // ---- Product title ----
         $title = $this->get_product_attribute_value( $product, 'skr-item' );
+        if ( empty( $title ) && $parent ) {
+            $title = $this->get_product_attribute_value( $parent, 'skr-item' );
+        }
         if ( empty( $title ) ) {
             $title = $product->get_name();
         }
@@ -829,11 +1116,11 @@ class Woo_Trendyol_Product_Creator {
         $payload = [
             'barcode'          => $barcode, // Resolved via configured barcode source.
             'title'            => mb_substr( $title, 0, 100 ),
-            'productMainId'    => $sku,
+            'productMainId'    => $product_main_id,
             'brandId'          => $brand_id,
             'categoryId'       => $category_id,
             'quantity'         => $quantity,
-            'stockCode'        => $sku,
+            'stockCode'        => $stock_code,
             'description'      => $description,
             'currencyType'     => Woo_Trendyol_API_Client::CURRENCY,
             'listPrice'        => round( $list_price, 2 ),
@@ -892,7 +1179,23 @@ class Woo_Trendyol_Product_Creator {
             $image_ids[] = $featured_id;
         }
 
-        // Gallery images.
+        // If variation, also include parent product featured and gallery images.
+        if ( $product->is_type( 'variation' ) || $product->get_parent_id() ) {
+            $parent = wc_get_product( $product->get_parent_id() );
+            if ( $parent ) {
+                $parent_featured_id = $parent->get_image_id();
+                if ( $parent_featured_id && ! in_array( $parent_featured_id, $image_ids, true ) ) {
+                    $image_ids[] = $parent_featured_id;
+                }
+                foreach ( $parent->get_gallery_image_ids() as $id ) {
+                    if ( ! in_array( $id, $image_ids, true ) ) {
+                        $image_ids[] = $id;
+                    }
+                }
+            }
+        }
+
+        // Gallery images on the product itself.
         foreach ( $product->get_gallery_image_ids() as $id ) {
             if ( ! in_array( $id, $image_ids, true ) ) {
                 $image_ids[] = $id;
@@ -901,7 +1204,19 @@ class Woo_Trendyol_Product_Creator {
 
         foreach ( $image_ids as $id ) {
             $url = wp_get_attachment_url( $id );
-            if ( $url && str_starts_with( $url, 'https://' ) ) {
+            if ( $url && ( str_starts_with( $url, 'https://' ) || str_starts_with( $url, 'http://' ) ) ) {
+                $parsed = parse_url( $url );
+                if ( $parsed && ! empty( $parsed['host'] ) && ! empty( $parsed['path'] ) ) {
+                    $path_parts    = explode( '/', $parsed['path'] );
+                    $encoded_parts = array_map( function( $part ) {
+                        return rawurlencode( rawurldecode( $part ) );
+                    }, $path_parts );
+                    $scheme        = $parsed['scheme'] ?? 'https';
+                    $host          = $parsed['host'];
+                    $port          = isset( $parsed['port'] ) ? ':' . $parsed['port'] : '';
+                    $query         = isset( $parsed['query'] ) ? '?' . $parsed['query'] : '';
+                    $url           = $scheme . '://' . $host . $port . implode( '/', $encoded_parts ) . $query;
+                }
                 $images[] = [ 'url' => $url ];
             }
         }
@@ -927,6 +1242,16 @@ class Woo_Trendyol_Product_Creator {
      */
     private function build_description( WC_Product $product ): string {
         $raw = $product->get_description();
+
+        if ( empty( $raw ) && ( $product->is_type( 'variation' ) || $product->get_parent_id() ) ) {
+            $parent = wc_get_product( $product->get_parent_id() );
+            if ( $parent ) {
+                $raw = $parent->get_description();
+                if ( empty( $raw ) ) {
+                    $raw = $parent->get_short_description();
+                }
+            }
+        }
 
         if ( empty( $raw ) ) {
             $raw = $product->get_short_description();
@@ -989,26 +1314,28 @@ class Woo_Trendyol_Product_Creator {
      */
     private function resolve_brand_id( WC_Product $product ): int {
         $product_id = $product->get_id();
+        $parent_id  = $product->get_parent_id();
 
         // ---- 1. Product-level manual override (post meta) ----
         $override = (int) get_post_meta( $product_id, '_trendyol_brand_id', true );
+        if ( ! $override && $parent_id ) {
+            $override = (int) get_post_meta( $parent_id, '_trendyol_brand_id', true );
+        }
         if ( $override ) {
             return $override;
         }
 
         // ---- 1b. Term-level brand ID stored by Brand_Sync ----
-        //
-        // When the user has run the brand sync tool, each product_brand term
-        // has a 'trendyol_brand_id' term meta key set by Brand_Sync::match_brand_term().
-        // This is the preferred automated source — it avoids an extra API call
-        // per product and respects any manual remapping done on the Edit Brand page.
         if ( taxonomy_exists( 'product_brand' ) ) {
             $brand_terms = get_the_terms( $product_id, 'product_brand' );
+            if ( ( ! $brand_terms || is_wp_error( $brand_terms ) ) && $parent_id ) {
+                $brand_terms = get_the_terms( $parent_id, 'product_brand' );
+            }
             if ( $brand_terms && ! is_wp_error( $brand_terms ) ) {
                 foreach ( $brand_terms as $brand_term ) {
                     $term_brand_id = (int) get_term_meta(
                         $brand_term->term_id,
-                        'trendyol_brand_id', // Woo_Trendyol_Brand_Sync::META_KEY
+                        'trendyol_brand_id',
                         true
                     );
                     if ( $term_brand_id ) {
@@ -1023,23 +1350,15 @@ class Woo_Trendyol_Product_Creator {
 
         // ---- 2a. WooCommerce Brands taxonomy (product_brand) ----
         if ( '__wc_brands__' === $brand_source ) {
-            /*
-             * The user explicitly chose the WC Brands taxonomy as the source.
-             * Guard with taxonomy_exists() so the plugin does not fatal-error
-             * if the feature is later disabled without updating the setting.
-             */
             if ( taxonomy_exists( 'product_brand' ) ) {
                 $brand_terms = get_the_terms( $product_id, 'product_brand' );
+                if ( ( ! $brand_terms || is_wp_error( $brand_terms ) ) && $parent_id ) {
+                    $brand_terms = get_the_terms( $parent_id, 'product_brand' );
+                }
                 if ( $brand_terms && ! is_wp_error( $brand_terms ) ) {
-                    /*
-                     * Use the first assigned brand term. In most stores a product
-                     * has exactly one brand; if multiple are assigned we take the
-                     * first (lowest term_id order as returned by WP).
-                     */
                     $brand_name = $brand_terms[0]->name;
                 }
             } else {
-                // Taxonomy not registered — log a warning and fall through.
                 $this->logger->warning(
                     sprintf(
                         'Brand source is set to WC Brands (product_brand) but the taxonomy is not registered. Product ID %d will use the generic fallback.',
@@ -1051,24 +1370,25 @@ class Woo_Trendyol_Product_Creator {
 
         // ---- 2b. WooCommerce product attribute (pa_*) ----
         if ( ! $brand_name && $brand_source && '__wc_brands__' !== $brand_source ) {
-            /*
-             * The user chose a specific pa_* attribute slug.
-             * get_product_attribute_value() handles both taxonomy-based and
-             * custom (non-taxonomy) attributes.
-             */
             $brand_name = $this->get_product_attribute_value( $product, $brand_source );
+            if ( ! $brand_name && $parent_id ) {
+                $parent = wc_get_product( $parent_id );
+                if ( $parent ) {
+                    $brand_name = $this->get_product_attribute_value( $parent, $brand_source );
+                }
+            }
         }
 
         // ---- 3. Generic fallback ----
         if ( ! $brand_name ) {
-            /*
-             * No brand source configured, or the configured source returned
-             * nothing. Try common brand/manufacturer attribute slugs in order.
-             * This ensures backward compatibility for stores that have not yet
-             * configured the brand mapping in settings.
-             */
             foreach ( [ 'pa_brand', 'pa_manufacturer', 'brand', 'manufacturer' ] as $slug ) {
                 $val = $this->get_product_attribute_value( $product, $slug );
+                if ( ! $val && $parent_id ) {
+                    $parent = wc_get_product( $parent_id );
+                    if ( $parent ) {
+                        $val = $this->get_product_attribute_value( $parent, $slug );
+                    }
+                }
                 if ( $val ) {
                     $brand_name = $val;
                     break;
@@ -1077,11 +1397,9 @@ class Woo_Trendyol_Product_Creator {
         }
 
         if ( ! $brand_name ) {
-            // No brand name could be resolved from any source.
             return 0;
         }
 
-        // Look up the numeric Trendyol brand ID by name via the API.
         return $this->lookup_brand_id( $brand_name );
     }
 
@@ -1170,17 +1488,26 @@ class Woo_Trendyol_Product_Creator {
      * @return string First attribute value, or empty string if not found.
      */
     private function get_product_attribute_value( WC_Product $product, string $attr_slug ): string {
+        $val = $product->get_attribute( $attr_slug );
+        if ( ! empty( $val ) ) {
+            return $val;
+        }
+
         $attributes = $product->get_attributes();
 
         // Try exact slug first.
         if ( isset( $attributes[ $attr_slug ] ) ) {
             $attr = $attributes[ $attr_slug ];
-            if ( $attr->is_taxonomy() ) {
-                $terms = wc_get_product_terms( $product->get_id(), $attr_slug, [ 'fields' => 'names' ] );
-                return ! empty( $terms ) ? $terms[0] : '';
+            if ( is_object( $attr ) && method_exists( $attr, 'is_taxonomy' ) ) {
+                if ( $attr->is_taxonomy() ) {
+                    $terms = wc_get_product_terms( $product->get_id(), $attr_slug, [ 'fields' => 'names' ] );
+                    return ! empty( $terms ) ? $terms[0] : '';
+                }
+                $options = $attr->get_options();
+                return ! empty( $options ) ? $options[0] : '';
+            } elseif ( is_string( $attr ) ) {
+                return $attr;
             }
-            $options = $attr->get_options();
-            return ! empty( $options ) ? $options[0] : '';
         }
 
         // Try without pa_ prefix.
@@ -1188,12 +1515,23 @@ class Woo_Trendyol_Product_Creator {
         foreach ( $attributes as $slug => $attr ) {
             $normalised = preg_replace( '/^pa_/', '', $slug );
             if ( strtolower( $normalised ) === strtolower( $without_prefix ) ) {
-                if ( $attr->is_taxonomy() ) {
-                    $terms = wc_get_product_terms( $product->get_id(), $slug, [ 'fields' => 'names' ] );
-                    return ! empty( $terms ) ? $terms[0] : '';
+                if ( is_object( $attr ) && method_exists( $attr, 'is_taxonomy' ) ) {
+                    if ( $attr->is_taxonomy() ) {
+                        $terms = wc_get_product_terms( $product->get_id(), $slug, [ 'fields' => 'names' ] );
+                        return ! empty( $terms ) ? $terms[0] : '';
+                    }
+                    $options = $attr->get_options();
+                    return ! empty( $options ) ? $options[0] : '';
+                } elseif ( is_string( $attr ) ) {
+                    return $attr;
                 }
-                $options = $attr->get_options();
-                return ! empty( $options ) ? $options[0] : '';
+            }
+        }
+
+        if ( $product->get_parent_id() ) {
+            $parent = wc_get_product( $product->get_parent_id() );
+            if ( $parent ) {
+                return $this->get_product_attribute_value( $parent, $attr_slug );
             }
         }
 

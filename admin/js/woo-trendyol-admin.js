@@ -44,6 +44,37 @@
         batches: []
     };
 
+    var syncOp = {
+        running: false,
+        paused:  false,
+        chunks:  [],
+        index:   0,
+        total:   0,
+        synced:  0,
+        skipped: 0,
+        batches: []
+    };
+
+    var unapprovedOp = {
+        running: false,
+        paused: false,
+        chunks: [],
+        index: 0,
+        total: 0,
+        submitted: 0,
+        skipped: 0,
+        batches: []
+    };
+
+    // Warn user before closing or leaving tab while any sync process is active
+    window.addEventListener( 'beforeunload', function ( e ) {
+        if ( bulkPush.running || syncOp.running || unapprovedOp.running ) {
+            e.preventDefault();
+            e.returnValue = 'Sync in progress. Please keep this browser tab open until the process finishes.';
+            return e.returnValue;
+        }
+    } );
+
     // =========================================================================
     // DOM ready
     // =========================================================================
@@ -58,8 +89,9 @@
         initPriceRulesToggle();
         initBulkPush();
         initSyncPriceStock();
-        initSyncPriceStock();
+        initUpdateUnapprovedProducts();
         initManualBatchPoll();
+        initLogExport();
 
         initAttrMapping();
         initSendToTrendyol();
@@ -697,12 +729,242 @@
     // Manual batch status poll
     // =========================================================================
 
+    // =========================================================================
+    // Update Unapproved Products (async, pauseable)
+    // =========================================================================
+
+    function initUpdateUnapprovedProducts() {
+        var $btn          = $( '#wt-unapproved-push' );
+        var $pauseBtn     = $( '#wt-unapproved-pause' );
+        var $resumeBtn    = $( '#wt-unapproved-resume' );
+        var $cancelBtn    = $( '#wt-unapproved-cancel' );
+        var $spinner      = $( '#wt-unapproved-spinner' );
+        var $progressWrap = $( '#wt-unapproved-progress-wrap' );
+        var $progressFill = $( '#wt-unapproved-progress-fill' );
+        var $progressText = $( '#wt-unapproved-progress-text' );
+        var $currentIds   = $( '#wt-unapproved-current-ids' );
+        var $totals       = $( '#wt-unapproved-totals' );
+        var $results      = $( '#wt-unapproved-results' );
+        var $resultsList  = $( '#wt-unapproved-results-list' );
+
+        // uses shared unapprovedOp
+
+        if ( ! $btn.length ) { return; }
+
+        $btn.on( 'click', function () {
+            if ( unapprovedOp.running && ! unapprovedOp.paused ) { return; }
+
+            unapprovedOp.running   = true;
+            unapprovedOp.paused    = false;
+            unapprovedOp.chunks    = [];
+            unapprovedOp.index     = 0;
+            unapprovedOp.total     = 0;
+            unapprovedOp.submitted = 0;
+            unapprovedOp.skipped   = 0;
+            unapprovedOp.batches   = [];
+
+            $btn.prop( 'disabled', true );
+            $pauseBtn.show().prop( 'disabled', false );
+            $resumeBtn.hide();
+            $cancelBtn.show();
+            $spinner.addClass( 'is-active' );
+            $progressWrap.show();
+            $progressFill.css( 'width', '0%' );
+            $progressText.text( '0 / ?' );
+            $currentIds.text( 'Fetching unapproved products list...' );
+            $totals.hide().empty();
+            $results.hide();
+            $resultsList.empty();
+
+            $.post( wooTrendyolAdmin.ajaxUrl, {
+                action: 'trendyol_get_unapproved_products_to_update',
+                nonce:  wooTrendyolAdmin.nonce
+            } )
+            .done( function ( response ) {
+                $spinner.removeClass( 'is-active' );
+
+                if ( ! response.success || ! response.data.product_ids ) {
+                    finishWithError( response.data && response.data.message ? response.data.message : 'Could not retrieve unapproved products list.' );
+                    return;
+                }
+
+                var ids = response.data.product_ids;
+                unapprovedOp.total = ids.length;
+
+                if ( response.data.message ) {
+                    appendRow( 'Info', 'info', response.data.message );
+                }
+
+                if ( unapprovedOp.total === 0 ) {
+                    finishWithError( 'No unapproved products found to update.' );
+                    return;
+                }
+
+                for ( var i = 0; i < ids.length; i += 20 ) {
+                    unapprovedOp.chunks.push( ids.slice( i, i + 20 ) );
+                }
+
+                $progressText.text( '0 / ' + unapprovedOp.total );
+                pushNextChunk();
+            } )
+            .fail( function () {
+                $spinner.removeClass( 'is-active' );
+                finishWithError( 'HTTP request failed while fetching unapproved products.' );
+            } );
+        } );
+
+        $pauseBtn.on( 'click', function () {
+            unapprovedOp.paused  = true;
+            unapprovedOp.running = false;
+            $pauseBtn.hide();
+            $resumeBtn.show();
+            $btn.prop( 'disabled', false );
+            $currentIds.text( 'Paused.' );
+        } );
+
+        $resumeBtn.on( 'click', function () {
+            unapprovedOp.paused  = false;
+            unapprovedOp.running = true;
+            $resumeBtn.hide();
+            $pauseBtn.show();
+            $btn.prop( 'disabled', true );
+            pushNextChunk();
+        } );
+
+        $cancelBtn.on( 'click', function () {
+            unapprovedOp.running = false;
+            unapprovedOp.paused  = false;
+            appendRow( 'Cancelled', 'error', 'Operation cancelled by user.' );
+            finishOperation();
+        } );
+
+        function pushNextChunk() {
+            if ( unapprovedOp.paused || ! unapprovedOp.running ) { return; }
+
+            if ( unapprovedOp.index >= unapprovedOp.chunks.length ) {
+                finishOperation();
+                return;
+            }
+
+            var chunk = unapprovedOp.chunks[ unapprovedOp.index++ ];
+            $currentIds.text( 'Submitting product IDs: ' + chunk.join( ', ' ) );
+
+            $.post( wooTrendyolAdmin.ajaxUrl, {
+                action:      'trendyol_bulk_update_unapproved_batch',
+                nonce:       wooTrendyolAdmin.nonce,
+                product_ids: JSON.stringify( chunk )
+            } )
+            .done( function ( res ) {
+                if ( res.success ) {
+                    unapprovedOp.submitted += res.data.submitted || 0;
+                    unapprovedOp.skipped   += res.data.skipped   || 0;
+                    if ( res.data.batches ) {
+                        unapprovedOp.batches = unapprovedOp.batches.concat( res.data.batches );
+                    }
+                    if ( res.data.errors ) {
+                        $.each( res.data.errors, function ( pid, msg ) {
+                            appendRow( pid, 'error', msg );
+                        } );
+                    }
+                } else {
+                    unapprovedOp.skipped += chunk.length;
+                    appendRow( 'Batch', 'error', res.data.message || 'Unknown error' );
+                }
+
+                var done = unapprovedOp.submitted + unapprovedOp.skipped;
+                var pct  = unapprovedOp.total > 0 ? Math.round( ( done / unapprovedOp.total ) * 100 ) : 0;
+                $progressFill.css( 'width', pct + '%' );
+                $progressText.text( done + ' / ' + unapprovedOp.total );
+
+                pushNextChunk();
+            } )
+            .fail( function () {
+                unapprovedOp.skipped += chunk.length;
+                appendRow( 'Batch', 'error', 'HTTP request failed for batch.' );
+                pushNextChunk();
+            } );
+        }
+
+        function appendRow( id, status, message ) {
+            var cls = status === 'error' ? 'wt-result--error' : ( status === 'info' ? 'wt-result--info' : 'wt-result--success' );
+            var now = new Date().toLocaleTimeString();
+            $resultsList.append(
+                '<div class="wt-result-row ' + cls + '">' +
+                '[' + now + '] <strong>#' + escHtml( String( id ) ) + '</strong> — ' + escHtml( message ) +
+                '</div>'
+            );
+            $results.show();
+        }
+
+        function finishOperation() {
+            unapprovedOp.running = false;
+            unapprovedOp.paused  = false;
+
+            $btn.prop( 'disabled', false );
+            $pauseBtn.hide();
+            $resumeBtn.hide();
+            $cancelBtn.hide();
+            $progressFill.css( 'width', '100%' );
+            $currentIds.text( 'Done.' );
+
+            $totals.html(
+                '<div class="wt-totals-row">' +
+                '<span class="wt-total-item wt-total--submitted">&#x2191; Submitted: <strong>' + unapprovedOp.submitted + '</strong></span>' +
+                '<span class="wt-total-item wt-total--skipped">&#x26A0; Skipped: <strong>' + unapprovedOp.skipped + '</strong></span>' +
+                '</div>'
+            ).show();
+
+            var summary = '<div class="wt-result-row wt-result--success">' +
+                '<strong>Update Complete:</strong> ' +
+                unapprovedOp.submitted + ' submitted, ' + unapprovedOp.skipped + ' skipped.' +
+                '</div>';
+
+            if ( unapprovedOp.batches.length ) {
+                summary += '<div class="wt-result-row wt-result--info">' +
+                    'Batch IDs: ' + escHtml( unapprovedOp.batches.join( ', ' ) ) +
+                    ' &mdash; <a href="#" class="wt-poll-batches" data-batches="' +
+                    escHtml( unapprovedOp.batches.join( ',' ) ) + '">Poll Status</a>' +
+                    '</div>';
+            }
+
+            $resultsList.prepend( summary );
+            $results.show();
+
+            if ( unapprovedOp.batches.length ) {
+                setTimeout( function () {
+                    pollBatchStatuses( unapprovedOp.batches, $resultsList, $results );
+                }, 10000 );
+            }
+        }
+
+        function finishWithError( msg ) {
+            unapprovedOp.running = false;
+            unapprovedOp.paused  = false;
+            $btn.prop( 'disabled', false );
+            $pauseBtn.hide();
+            $resumeBtn.hide();
+            $cancelBtn.hide();
+            $progressWrap.hide();
+            appendRow( 'Error', 'error', msg );
+            $results.show();
+        }
+    }
+
+    // =========================================================================
+    // Manual & Auto Batch Polling
+    // =========================================================================
+
     function initManualBatchPoll() {
         $( document ).on( 'click', '.wt-poll-batches', function ( e ) {
             e.preventDefault();
-            var batches      = $( this ).data( 'batches' ).toString().split( ',' );
-            var $resultsList = $( '#wt-bulk-results-list' );
-            var $results     = $( '#wt-bulk-results' );
+            var $link        = $( this );
+            var batches      = $link.data( 'batches' ).toString().split( ',' );
+            var $results     = $link.closest( '.wt-bulk-results' );
+            var $resultsList = $results.find( '.wt-log-box, div[id$="-results-list"]' );
+            if ( ! $resultsList.length ) {
+                $resultsList = $( '#wt-bulk-results-list' );
+                $results     = $( '#wt-bulk-results' );
+            }
             pollBatchStatuses( batches, $resultsList, $results );
         } );
     }
@@ -718,33 +980,131 @@
             } )
             .done( function ( response ) {
                 var msg;
+                var now = new Date().toLocaleTimeString();
+
                 if ( response.success ) {
                     var data   = response.data;
                     var status = data.status || 'UNKNOWN';
                     var items  = data.items  || [];
                     var failed = $.grep( items, function ( item ) {
-                        return item.status === 'ERROR';
+                        return item.status === 'ERROR' || item.status === 'FAILED' || ( item.failureReasons && item.failureReasons.length > 0 );
                     } );
 
-                    msg = 'Batch <strong>' + escHtml( batchId ) + '</strong>: ' + escHtml( status ) +
-                          ' (' + items.length + ' items, ' + failed.length + ' errors)';
+                    var statusCls = status === 'COMPLETED' ? ( failed.length ? 'color:#c92a2a;' : 'color:#1a7a2e;' ) : 'color:#d97706;';
+
+                    msg = '[' + now + '] Batch <code>' + escHtml( batchId ) + '</code>: <strong style="' + statusCls + '">' + escHtml( status ) + '</strong>' +
+                          ' (' + items.length + ' items, ' + failed.length + ' error(s))';
 
                     if ( failed.length ) {
-                        msg += '<ul>';
+                        msg += '<ul class="wt-log-item-failure">';
                         $.each( failed, function ( j, item ) {
-                            var reasons = ( item.failureReasons || [] ).join( ', ' );
-                            msg += '<li>' + escHtml( item.barcode || '' ) + ': ' + escHtml( reasons ) + '</li>';
+                            var barcode = item.barcode || ( item.requestItem && item.requestItem.product && item.requestItem.product.barcode ) || 'Item';
+                            var reasons = [];
+                            if ( item.failureReasons && item.failureReasons.length ) {
+                                $.each( item.failureReasons, function ( k, r ) {
+                                    if ( typeof r === 'object' && r !== null ) {
+                                        reasons.push( r.message || r.reason || JSON.stringify( r ) );
+                                    } else {
+                                        reasons.push( String( r ) );
+                                    }
+                                } );
+                            } else if ( item.status ) {
+                                reasons.push( 'Status: ' + item.status );
+                            }
+                            msg += '<li><strong>' + escHtml( barcode ) + '</strong>: ' + escHtml( reasons.join( '; ' ) ) + '</li>';
                         } );
                         msg += '</ul>';
                     }
+
+                    if ( status === 'IN_PROGRESS' || status === 'PROCESSING' || status === 'WAITING' ) {
+                        setTimeout( function () {
+                            pollBatchStatuses( [ batchId ], $list, $wrap );
+                        }, 10000 );
+                    }
                 } else {
-                    msg = 'Batch <strong>' + escHtml( batchId ) + '</strong>: ' +
-                          escHtml( ( response.data && response.data.message ) || 'Error' );
+                    msg = '[' + now + '] Batch <code>' + escHtml( batchId ) + '</code>: ' +
+                          escHtml( ( response.data && response.data.message ) || 'Error polling batch.' );
                 }
 
                 $list.append( '<div class="wt-result-row wt-result--info">' + msg + '</div>' );
                 $wrap.show();
             } );
+        } );
+    }
+
+    // =========================================================================
+    // Log Box Actions (Copy & Download TXT)
+    // =========================================================================
+
+    function initLogExport() {
+        $( document ).on( 'click', '.wt-copy-log-btn', function ( e ) {
+            e.preventDefault();
+            var $btn = $( this );
+            var targetSelector = $btn.data( 'target' );
+            var $target = $( targetSelector );
+            if ( ! $target.length ) { return; }
+
+            var lines = [];
+            $target.find( '.wt-result-row' ).each( function () {
+                var text = $( this ).text().trim();
+                if ( text ) {
+                    lines.push( text );
+                }
+            } );
+
+            var logText = lines.join( '\n' );
+            if ( ! logText ) {
+                logText = $target.text().trim();
+            }
+
+            if ( navigator.clipboard && navigator.clipboard.writeText ) {
+                navigator.clipboard.writeText( logText ).then( function () {
+                    var originalHtml = $btn.html();
+                    $btn.html( '<span class="dashicons dashicons-yes"></span> Copied!' );
+                    setTimeout( function () { $btn.html( originalHtml ); }, 2000 );
+                } );
+            } else {
+                var $temp = $( '<textarea>' );
+                $( 'body' ).append( $temp );
+                $temp.val( logText ).select();
+                document.execCommand( 'copy' );
+                $temp.remove();
+                var orig = $btn.html();
+                $btn.html( '<span class="dashicons dashicons-yes"></span> Copied!' );
+                setTimeout( function () { $btn.html( orig ); }, 2000 );
+            }
+        } );
+
+        $( document ).on( 'click', '.wt-download-log-btn', function ( e ) {
+            e.preventDefault();
+            var $btn = $( this );
+            var targetSelector = $btn.data( 'target' );
+            var filename = $btn.data( 'filename' ) || 'trendyol-sync-log.txt';
+            var $target = $( targetSelector );
+            if ( ! $target.length ) { return; }
+
+            var lines = [];
+            $target.find( '.wt-result-row' ).each( function () {
+                var text = $( this ).text().trim();
+                if ( text ) {
+                    lines.push( text );
+                }
+            } );
+
+            var logText = lines.join( '\r\n' );
+            if ( ! logText ) {
+                logText = $target.text().trim();
+            }
+
+            var blob = new Blob( [ logText ], { type: 'text/plain;charset=utf-8' } );
+            var url  = URL.createObjectURL( blob );
+            var a    = document.createElement( 'a' );
+            a.href     = url;
+            a.download = filename;
+            document.body.appendChild( a );
+            a.click();
+            document.body.removeChild( a );
+            URL.revokeObjectURL( url );
         } );
     }
 

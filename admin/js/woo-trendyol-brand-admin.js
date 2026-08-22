@@ -18,6 +18,15 @@
         unmatched: 0
     };
 
+    // Warn user before closing or leaving tab while brand sync is active
+    window.addEventListener( 'beforeunload', function ( e ) {
+        if ( brandSync.running ) {
+            e.preventDefault();
+            e.returnValue = 'Brand sync in progress. Please keep this browser tab open until the process finishes.';
+            return e.returnValue;
+        }
+    } );
+
     $( function () {
         if ( typeof wtBrand === 'undefined' ) {
             return;

@@ -93,7 +93,18 @@ class Woo_Trendyol_Category_Helper {
         }
 
         // ---- Priority 3 & 4: scan all assigned categories ----
-        return $this->resolve_from_product_categories( $post_id );
+        $category_id = $this->resolve_from_product_categories( $post_id );
+        if ( ! empty( $category_id ) ) {
+            return $category_id;
+        }
+
+        // ---- Variation fallback: resolve from parent product ----
+        $parent_id = wp_get_post_parent_id( $post_id );
+        if ( $parent_id && $parent_id !== $post_id ) {
+            return $this->get_trendyol_category_id( $parent_id );
+        }
+
+        return '';
     }
 
     /**
@@ -126,7 +137,18 @@ class Woo_Trendyol_Category_Helper {
         }
 
         // ---- Priority 3 & 4: scan all assigned categories ----
-        return $this->resolve_path_from_product_categories( $post_id );
+        $path = $this->resolve_path_from_product_categories( $post_id );
+        if ( ! empty( $path ) ) {
+            return $path;
+        }
+
+        // ---- Variation fallback: resolve from parent product ----
+        $parent_id = wp_get_post_parent_id( $post_id );
+        if ( $parent_id && $parent_id !== $post_id ) {
+            return $this->get_trendyol_category_path( $parent_id );
+        }
+
+        return '';
     }
 
     /**
@@ -378,6 +400,9 @@ class Woo_Trendyol_Category_Helper {
 
         // Deepest mapped category
         $terms = get_the_terms( $post_id, 'product_cat' );
+        if ( ( empty( $terms ) || is_wp_error( $terms ) ) && ( $parent_id = wp_get_post_parent_id( $post_id ) ) && $parent_id !== $post_id ) {
+            return $this->get_resolved_category_term( $parent_id );
+        }
         if ( empty( $terms ) || is_wp_error( $terms ) ) {
             return null;
         }

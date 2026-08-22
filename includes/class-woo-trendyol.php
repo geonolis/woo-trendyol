@@ -283,6 +283,8 @@ class Woo_Trendyol {
         $this->loader->add_action( 'wp_ajax_trendyol_get_pushable_products', $admin, 'ajax_get_pushable_products' );
         $this->loader->add_action( 'wp_ajax_trendyol_bulk_push_batch',       $admin, 'ajax_bulk_push_batch' );
         $this->loader->add_action( 'wp_ajax_trendyol_bulk_sync_price_stock_batch', $admin, 'ajax_bulk_sync_price_stock_batch' );
+        $this->loader->add_action( 'wp_ajax_trendyol_get_unapproved_products_to_update', $admin, 'ajax_get_unapproved_products_to_update' );
+        $this->loader->add_action( 'wp_ajax_trendyol_bulk_update_unapproved_batch', $admin, 'ajax_bulk_update_unapproved_batch' );
         $this->loader->add_action( 'wp_ajax_trendyol_poll_batch_status',     $admin, 'ajax_poll_batch_status' );
 
         // AJAX handlers — product edit page.
@@ -379,7 +381,8 @@ class Woo_Trendyol {
             $this->version,
             $this->api,
             $this->logger,
-            $this->category_helper
+            $this->category_helper,
+            $this->product_creator
         );
 
         $this->loader->add_action( 'woocommerce_after_product_object_save', $product_sync, 'on_product_saved',      10, 2 );
@@ -388,6 +391,8 @@ class Woo_Trendyol {
         $this->loader->add_action( 'edit_attachment',                       $product_sync, 'on_attachment_updated', 10, 1 );
         $this->loader->add_action( 'woocommerce_product_set_stock',         $product_sync, 'on_product_stock_set',  10, 1 );
         $this->loader->add_action( 'woocommerce_variation_set_stock',       $product_sync, 'on_product_stock_set',  10, 1 );
+        $this->loader->add_action( 'woocommerce_reduce_order_stock',         $product_sync, 'on_order_stock_reduced', 10, 1 );
+        $this->loader->add_action( 'woocommerce_restore_order_stock',        $product_sync, 'on_order_stock_restored', 10, 1 );
 
         // Order sync (polling + status notifications).
         $order_sync = new Woo_Trendyol_Order_Sync(
@@ -402,6 +407,7 @@ class Woo_Trendyol {
         $this->loader->add_action( Woo_Trendyol_Order_Sync::CRON_HOOK,      $order_sync, 'poll_orders' );
         $this->loader->add_action( 'woocommerce_order_status_processing',    $order_sync, 'on_order_processing', 10, 1 );
         $this->loader->add_action( 'woocommerce_order_status_completed',     $order_sync, 'on_order_completed',  10, 1 );
+        $this->loader->add_action( 'woocommerce_order_status_cancelled',     $order_sync, 'on_order_cancelled',  10, 1 );
     }
 
     // -----------------------------------------------------------------------
