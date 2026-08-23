@@ -490,6 +490,11 @@ class Woo_Trendyol_Product_Sync {
      * @return array|null  Item array, or null if barcode is missing.
      */
     private function build_price_stock_item( WC_Product $product ): ?array {
+        // Never send price/stock for variable parent products (only variations or simple products)
+        if ( $product->is_type( 'variable' ) ) {
+            return null;
+        }
+
         $barcode = $this->product_creator->resolve_barcode( $product );
         if ( empty( $barcode ) ) {
             return null;

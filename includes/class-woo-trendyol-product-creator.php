@@ -505,6 +505,11 @@ class Woo_Trendyol_Product_Creator {
         }
 
         foreach ( $flat_products as $product ) {
+            // Guard: Never send price/stock for variable parent products
+            if ( $product->is_type( 'variable' ) ) {
+                continue;
+            }
+
             $pid = $product->get_id();
 
             // Price & Stock Sync applies ONLY to already pushed products
