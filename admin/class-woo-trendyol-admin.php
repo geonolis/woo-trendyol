@@ -277,6 +277,7 @@ class Woo_Trendyol_Admin {
             'trendyol_handling_time_type',
             'trendyol_handling_time_days',
             'trendyol_handling_time_wc_attr',
+            'trendyol_default_order_status',
         ];
         foreach ( $default_options as $opt ) {
             register_setting( 'woo_trendyol_defaults_settings', $opt, [ 'sanitize_callback' => 'sanitize_text_field' ] );
@@ -320,6 +321,7 @@ class Woo_Trendyol_Admin {
         );
 
         $default_fields = [
+            [ 'trendyol_default_order_status',     __( 'Default Order Status', 'woo-trendyol' ), 'render_field_default_order_status' ],
             [ 'trendyol_barcode_source',           __( 'Barcode Source',      'woo-trendyol' ), 'render_field_barcode_source'  ],
             [ 'trendyol_default_cargo_company_id', __( 'Cargo Company ID',    'woo-trendyol' ), 'render_field_cargo_company'   ],
             [ 'trendyol_default_vat_rate',         __( 'VAT Rate (%)',        'woo-trendyol' ), 'render_field_vat_rate'        ],
@@ -944,6 +946,25 @@ class Woo_Trendyol_Admin {
      * @since 1.0.0
      * @param array $args Field arguments.
      */
+    /**
+     * Render the default order status select dropdown.
+     *
+     * @since 1.0.0
+     * @param array $args Field args.
+     */
+    public function render_field_default_order_status( array $args = [] ): void {
+        $val = get_option( 'trendyol_default_order_status', 'processing' );
+        ?>
+        <select name="trendyol_default_order_status" id="trendyol_default_order_status">
+            <option value="processing" <?php selected( $val, 'processing' ); ?>><?php esc_html_e( 'Processing (Recommended)', 'woo-trendyol' ); ?></option>
+            <option value="on-hold" <?php selected( $val, 'on-hold' ); ?>><?php esc_html_e( 'On hold', 'woo-trendyol' ); ?></option>
+        </select>
+        <p class="description">
+            <?php esc_html_e( 'WooCommerce order status assigned to newly imported Trendyol orders. Stock will be reduced automatically upon order creation.', 'woo-trendyol' ); ?>
+        </p>
+        <?php
+    }
+
     public function render_field_handling_time( array $args ): void {
         $type    = get_option( 'trendyol_handling_time_type',    'fixed' );
         $days    = (int) get_option( 'trendyol_handling_time_days',    3 );
@@ -3690,9 +3711,23 @@ class Woo_Trendyol_Admin {
             header( 'Content-Disposition: attachment; filename="shipping-label-' . $tracking_number . '.zpl"' );
             echo $label;
         } else {
+            // Support URL, raw %PDF stream, and base64-encoded PDF
+            if ( filter_var( $label, FILTER_VALIDATE_URL ) || str_starts_with( $label, 'http://' ) || str_starts_with( $label, 'https://' ) ) {
+                $response = wp_remote_get( $label, [ 'timeout' => 30 ] );
+                if ( is_wp_error( $response ) ) {
+                    wp_redirect( $label );
+                    exit;
+                }
+                $pdf_content = wp_remote_retrieve_body( $response );
+            } elseif ( str_starts_with( $label, '%PDF' ) ) {
+                $pdf_content = $label;
+            } else {
+                $pdf_content = base64_decode( $label );
+            }
+
             header( 'Content-Type: application/pdf' );
             header( 'Content-Disposition: inline; filename="shipping-label-' . $tracking_number . '.pdf"' );
-            echo base64_decode( $label );
+            echo $pdf_content;
         }
         exit;
     }

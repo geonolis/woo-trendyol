@@ -17,3 +17,6 @@ test.php
 test-*.php
 test_*.php
 scratch/
+
+# Agent files
+.agents/

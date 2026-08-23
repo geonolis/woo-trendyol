@@ -706,14 +706,14 @@ class Woo_Trendyol_API_Client {
     /**
      * Notify Trendyol that a package is unsupplied / cancelled (out of stock).
      *
-     * Endpoint: PUT /order/sellers/{sellerId}/shipment-packages/{packageId}/unsupplied
+     * Endpoint: PUT /order/sellers/{sellerId}/shipment-packages/{packageId}/items/unsupplied
      *
      * @since 1.0.0
      * @param string $package_id The Trendyol shipment package ID.
      * @param array  $lines      Optional array of line items [ ['lineId' => ..., 'quantity' => ..., 'reasonId' => 501] ].
      * @return array|WP_Error Decoded response or WP_Error.
      */
-    public function mark_package_unsupplied( string $package_id, array $lines = [] ): array|WP_Error {
+    public function mark_package_unsupplied( string $package_id, array $lines = [], int $reason_id = 500 ): array|WP_Error {
         if ( empty( $lines ) ) {
             // Fetch package details to populate line IDs
             $pkg_response = $this->get_shipment_package( $package_id );
@@ -722,24 +722,18 @@ class Woo_Trendyol_API_Client {
                     $lines[] = [
                         'lineId'   => (int) ( $line['lineId'] ?? $line['id'] ?? 0 ),
                         'quantity' => (int) ( $line['quantity'] ?? 1 ),
-                        'reasonId' => 501, // Out of stock / Tedarik Edilemedi
                     ];
                 }
             }
         }
 
         $payload = [
-            'lines'  => $lines,
-            'params' => (object) [],
+            'lines'    => $lines,
+            'reasonId' => $reason_id,
+            'params'   => (object) [],
         ];
 
-        $response = $this->put( "/order/sellers/{$this->seller_id}/shipment-packages/{$package_id}/unsupplied", $payload );
-
-        if ( is_wp_error( $response ) ) {
-            return $this->update_package_status( $package_id, 'UnSupplied' );
-        }
-
-        return $response;
+        return $this->put( "/order/sellers/{$this->seller_id}/shipment-packages/{$package_id}/items/unsupplied", $payload );
     }
 
     /**

@@ -418,7 +418,19 @@ class Woo_Trendyol_Order_Sync {
             return;
         }
 
-        $response = $this->api->mark_package_unsupplied( (string) $package_id );
+        // Collect line IDs from order items if available
+        $lines = [];
+        foreach ( $order->get_items() as $item ) {
+            $ty_line_id = $item->get_meta( '_trendyol_line_id', true );
+            if ( ! empty( $ty_line_id ) ) {
+                $lines[] = [
+                    'lineId'   => (int) $ty_line_id,
+                    'quantity' => (int) $item->get_quantity(),
+                ];
+            }
+        }
+
+        $response = $this->api->mark_package_unsupplied( (string) $package_id, $lines );
 
         if ( is_wp_error( $response ) ) {
             $this->logger->error(
@@ -484,9 +496,8 @@ class Woo_Trendyol_Order_Sync {
         }
 
         try {
-            // wc_create_order() writes to the active order data store.
+            // Instantiate order without initial status to avoid premature empty emails & stock checks.
             $order = wc_create_order( [
-                'status'      => 'on-hold',
                 'customer_id' => 0, // Guest order.
             ] );
 
@@ -501,7 +512,7 @@ class Woo_Trendyol_Order_Sync {
                 return false;
             }
 
-            // Populate billing / shipping address.
+            // Populate billing / shipping address (including postcode).
             $this->set_order_address( $order, $package );
 
             // Add product line items.
@@ -522,9 +533,19 @@ class Woo_Trendyol_Order_Sync {
             $order->update_meta_data( '_trendyol_total_discount',          $package['totalDiscount']       ?? '' );
             $order->update_meta_data( '_trendyol_delivery_type',           $package['deliveryType']        ?? '' );
 
+            // Origin / created via
+            $order->set_created_via( 'trendyol' );
+
             // Set payment method origin
             $order->set_payment_method( 'trendyol' );
             $order->set_payment_method_title( 'Trendyol' );
+
+            // Order Attribution metadata (WooCommerce 8.5+ & HPOS compatible)
+            $order->update_meta_data( '_wc_order_attribution_source_type',   'typein' );
+            $order->update_meta_data( '_wc_order_attribution_origin',        'Trendyol' );
+            $order->update_meta_data( '_wc_order_attribution_utm_source',    'Trendyol' );
+            $order->update_meta_data( '_wc_order_attribution_utm_medium',    'marketplace' );
+            $order->update_meta_data( '_wc_order_attribution_utm_campaign',  'trendyol_sync' );
 
             // Add a human-readable order note.
             $order->add_order_note(
@@ -541,7 +562,21 @@ class Woo_Trendyol_Order_Sync {
                 $order->calculate_taxes();
             }
             $order->calculate_totals( false );
+
+            // Transition status to target status (default: processing).
+            $target_status = (string) get_option( 'trendyol_default_order_status', 'processing' );
+            $order->set_status( $target_status, __( 'Order imported from Trendyol.', 'woo-trendyol' ) );
             $order->save();
+
+            // Ensure stock levels are reduced for all products in WooCommerce.
+            wc_reduce_stock_levels( $order->get_id() );
+
+            // Dispatch admin new order email now that line items and totals exist.
+            $mailer = WC()->mailer();
+            $emails = $mailer ? $mailer->get_emails() : [];
+            if ( ! empty( $emails['WC_Email_New_Order'] ) ) {
+                $emails['WC_Email_New_Order']->trigger( $order->get_id(), $order );
+            }
 
             $this->logger->info(
                 sprintf(
@@ -585,29 +620,38 @@ class Woo_Trendyol_Order_Sync {
      * @param  array    $package Trendyol package data.
      */
     private function set_order_address( WC_Order $order, array $package ): void {
-        $first_name   = $package['customerFirstName']              ?? '';
-        $last_name    = $package['customerLastName']               ?? '';
-        $address1     = $package['shipmentAddress']['address1']    ?? '';
-        $city         = $package['shipmentAddress']['city']        ?? '';
-        $district     = $package['shipmentAddress']['district']    ?? '';
-        $country_code = $package['shipmentAddress']['countryCode'] ?? 'GR';
-        $phone        = $package['customerPhone']                  ?? '';
-        $email        = $package['customerEmail']                  ?? '';
+        $shipment_addr = $package['shipmentAddress'] ?? [];
+        $invoice_addr  = $package['invoiceAddress']  ?? $shipment_addr;
 
-        $address = [
-            'first_name' => sanitize_text_field( $first_name ),
-            'last_name'  => sanitize_text_field( $last_name ),
-            'address_1'  => sanitize_text_field( $address1 ),
-            'address_2'  => sanitize_text_field( $district ),
-            'city'       => sanitize_text_field( $city ),
-            'country'    => sanitize_text_field( $country_code ),
-            'phone'      => sanitize_text_field( $phone ),
-            'email'      => sanitize_email( $email ),
+        $shipping = [
+            'first_name' => sanitize_text_field( $shipment_addr['firstName'] ?? $package['customerFirstName'] ?? '' ),
+            'last_name'  => sanitize_text_field( $shipment_addr['lastName']  ?? $package['customerLastName']  ?? '' ),
+            'company'    => sanitize_text_field( $shipment_addr['company']   ?? '' ),
+            'address_1'  => sanitize_text_field( $shipment_addr['address1']  ?? '' ),
+            'address_2'  => sanitize_text_field( $shipment_addr['district']  ?? '' ),
+            'city'       => sanitize_text_field( $shipment_addr['city']      ?? '' ),
+            'postcode'   => sanitize_text_field( $shipment_addr['postalCode'] ?? '' ),
+            'country'    => sanitize_text_field( $shipment_addr['countryCode'] ?? 'GR' ),
+            'phone'      => sanitize_text_field( $shipment_addr['phone']     ?? $package['customerPhone'] ?? '' ),
+            'email'      => sanitize_email( $package['customerEmail'] ?? '' ),
+        ];
+
+        $billing = [
+            'first_name' => sanitize_text_field( $invoice_addr['firstName'] ?? $package['customerFirstName'] ?? '' ),
+            'last_name'  => sanitize_text_field( $invoice_addr['lastName']  ?? $package['customerLastName']  ?? '' ),
+            'company'    => sanitize_text_field( $invoice_addr['company']   ?? '' ),
+            'address_1'  => sanitize_text_field( $invoice_addr['address1']  ?? '' ),
+            'address_2'  => sanitize_text_field( $invoice_addr['district']  ?? '' ),
+            'city'       => sanitize_text_field( $invoice_addr['city']      ?? '' ),
+            'postcode'   => sanitize_text_field( $invoice_addr['postalCode'] ?? $shipment_addr['postalCode'] ?? '' ),
+            'country'    => sanitize_text_field( $invoice_addr['countryCode'] ?? $shipment_addr['countryCode'] ?? 'GR' ),
+            'phone'      => sanitize_text_field( $invoice_addr['phone']     ?? $package['customerPhone'] ?? '' ),
+            'email'      => sanitize_email( $package['customerEmail'] ?? '' ),
         ];
 
         // set_address() is the WC CRUD method — works with HPOS and legacy.
-        $order->set_address( $address, 'billing' );
-        $order->set_address( $address, 'shipping' );
+        $order->set_address( $billing, 'billing' );
+        $order->set_address( $shipping, 'shipping' );
     }
 
     /**
@@ -694,6 +738,10 @@ class Woo_Trendyol_Order_Sync {
                     $item->set_total( $net_total );
 
                     // Store the Trendyol reference details on the line item for reference.
+                    $line_id = (string) ( $line['lineId'] ?? $line['id'] ?? '' );
+                    if ( ! empty( $line_id ) ) {
+                        $item->add_meta_data( '_trendyol_line_id', $line_id );
+                    }
                     $item->add_meta_data( '_trendyol_merchant_sku', $merchant_sku );
                     if ( ! empty( $barcode ) ) {
                         $item->add_meta_data( '_trendyol_barcode', $barcode );
@@ -714,7 +762,11 @@ class Woo_Trendyol_Order_Sync {
                 $net_fee = $gross_line_total;
             }
 
+            $line_id = (string) ( $line['lineId'] ?? $line['id'] ?? '' );
             $fee = new WC_Order_Item_Fee();
+            if ( ! empty( $line_id ) ) {
+                $fee->add_meta_data( '_trendyol_line_id', $line_id );
+            }
             $fee_name = sanitize_text_field( $name );
             if ( ! empty( $merchant_sku ) ) {
                 $fee_name .= ' (' . esc_html( $merchant_sku ) . ')';
@@ -863,9 +915,10 @@ class Woo_Trendyol_Order_Sync {
                     $order->save();
                     $this->logger->info( sprintf( 'Order %d (package %s) carrier status updated: %s', $order->get_id(), $package_id, $ty_status ) );
                 }
-            } elseif ( 'Cancelled' === $ty_status && 'cancelled' !== $current_wc_status ) {
-                $order->update_status( 'cancelled', __( 'Trendyol package status updated to Cancelled.', 'woo-trendyol' ) );
-                $this->logger->info( sprintf( 'Order %d (package %s) transitioned to cancelled based on Trendyol status: Cancelled', $order->get_id(), $package_id ) );
+            } elseif ( in_array( $ty_status, [ 'Cancelled', 'UnSupplied' ], true ) && 'cancelled' !== $current_wc_status ) {
+                $order->update_meta_data( '_trendyol_notified_cancelled', 'yes' );
+                $order->update_status( 'cancelled', sprintf( __( 'Trendyol package status updated to %s.', 'woo-trendyol' ), $ty_status ) );
+                $this->logger->info( sprintf( 'Order %d (package %s) transitioned to cancelled based on Trendyol status: %s', $order->get_id(), $package_id, $ty_status ) );
             }
         }
     }
