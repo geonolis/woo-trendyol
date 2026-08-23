@@ -383,18 +383,59 @@ class Woo_Trendyol_Product_Creator {
                 continue;
             }
 
+            $brand_id = ! empty( $payload['brandId'] ) ? (int) $payload['brandId'] : 0;
+            $cat_id   = ! empty( $payload['categoryId'] ) ? (int) $payload['categoryId'] : 0;
+            $attrs    = ! empty( $payload['attributes'] ) ? $payload['attributes'] : [];
+            $main_id  = $payload['productMainId'] ?? '';
+
+            if ( ! $brand_id || empty( $attrs ) || ! $cat_id ) {
+                $ty_prod = $this->api->get_product_base( $barcode );
+                if ( ! is_wp_error( $ty_prod ) ) {
+                    if ( ! $brand_id ) {
+                        $brand_id = (int) ( $ty_prod['brand']['id'] ?? 0 );
+                    }
+                    if ( ! $cat_id ) {
+                        $cat_id = (int) ( $ty_prod['category']['id'] ?? 0 );
+                    }
+                    if ( empty( $main_id ) ) {
+                        $main_id = $ty_prod['productMainId'] ?? '';
+                    }
+                    if ( empty( $attrs ) && ! empty( $ty_prod['attributes'] ) ) {
+                        foreach ( $ty_prod['attributes'] as $ty_attr ) {
+                            if ( ! empty( $ty_attr['attributeValueId'] ) ) {
+                                $attrs[] = [
+                                    'attributeId'      => (int) $ty_attr['attributeId'],
+                                    'attributeValueId' => (int) $ty_attr['attributeValueId'],
+                                ];
+                            } elseif ( ! empty( $ty_attr['attributeValue'] ) ) {
+                                $attrs[] = [
+                                    'attributeId'          => (int) $ty_attr['attributeId'],
+                                    'customAttributeValue' => (string) $ty_attr['attributeValue'],
+                                ];
+                            }
+                        }
+                    }
+                }
+            }
+
+            if ( ! $brand_id ) {
+                $result['skipped']++;
+                $result['errors'][ $item_id ] = __( 'Product has no brand mapped and no existing brand on Trendyol.', 'woo-trendyol' );
+                continue;
+            }
+
             $unapproved_items[] = [
                 'barcode'           => $barcode,
                 'title'             => $payload['title'],
                 'description'       => $payload['description'],
-                'productMainId'     => $payload['productMainId'] ?? '',
-                'brandId'           => $payload['brandId'] ?? 0,
-                'categoryId'        => $payload['categoryId'] ?? 0,
+                'productMainId'     => $main_id,
+                'brandId'           => $brand_id,
+                'categoryId'        => $cat_id,
                 'stockCode'         => $payload['stockCode'] ?? $barcode,
                 'vatRate'           => $payload['vatRate'] ?? 0,
                 'dimensionalWeight' => $payload['dimensionalWeight'] ?? 1,
                 'images'            => $payload['images'],
-                'attributes'        => $payload['attributes'],
+                'attributes'        => $attrs,
             ];
             $barcode_map[ $barcode ] = $item_id;
         }
@@ -800,17 +841,44 @@ class Woo_Trendyol_Product_Creator {
                 ];
                 $content_id_map[ $content_id ] = $product_id;
             } else {
+                $brand_id = ! empty( $payload['brandId'] ) ? (int) $payload['brandId'] : (int) ( $trendyol_product['brand']['id'] ?? 0 );
+                $cat_id   = ! empty( $payload['categoryId'] ) ? (int) $payload['categoryId'] : (int) ( $trendyol_product['category']['id'] ?? 0 );
+
+                if ( ! $brand_id ) {
+                    $result['skipped']++;
+                    $result['errors'][ $product_id ] = __( 'Product has no brand mapped and no existing brand on Trendyol.', 'woo-trendyol' );
+                    continue;
+                }
+
+                $attrs = ! empty( $payload['attributes'] ) ? $payload['attributes'] : [];
+                if ( empty( $attrs ) && ! empty( $trendyol_product['attributes'] ) ) {
+                    foreach ( $trendyol_product['attributes'] as $ty_attr ) {
+                        if ( ! empty( $ty_attr['attributeValueId'] ) ) {
+                            $attrs[] = [
+                                'attributeId'      => (int) $ty_attr['attributeId'],
+                                'attributeValueId' => (int) $ty_attr['attributeValueId'],
+                            ];
+                        } elseif ( ! empty( $ty_attr['attributeValue'] ) ) {
+                            $attrs[] = [
+                                'attributeId'          => (int) $ty_attr['attributeId'],
+                                'customAttributeValue' => (string) $ty_attr['attributeValue'],
+                            ];
+                        }
+                    }
+                }
+
                 $unapproved_items[] = [
-                    'barcode'       => $barcode,
-                    'title'         => $payload['title'],
-                    'description'   => $payload['description'],
-                    'productMainId' => $payload['productMainId'] ?? '',
-                    'brandId'       => $payload['brandId'] ?? 0,
-                    'categoryId'    => $payload['categoryId'] ?? 0,
-                    'stockCode'     => $payload['stockCode'] ?? '',
-                    'vatRate'       => $payload['vatRate'] ?? 0,
-                    'images'        => $payload['images'],
-                    'attributes'    => $payload['attributes'],
+                    'barcode'           => $barcode,
+                    'title'             => $payload['title'],
+                    'description'       => $payload['description'],
+                    'productMainId'     => $payload['productMainId'] ?? ( $trendyol_product['productMainId'] ?? '' ),
+                    'brandId'           => $brand_id,
+                    'categoryId'        => $cat_id,
+                    'stockCode'         => $payload['stockCode'] ?? $barcode,
+                    'vatRate'           => $payload['vatRate'] ?? 0,
+                    'dimensionalWeight' => $payload['dimensionalWeight'] ?? 1,
+                    'images'            => $payload['images'],
+                    'attributes'        => $attrs,
                 ];
                 $barcode_map[ $barcode ] = $product_id;
             }
@@ -1040,6 +1108,34 @@ class Woo_Trendyol_Product_Creator {
      * @param WC_Product $product The WooCommerce product.
      * @return array|WP_Error Complete payload array or WP_Error if validation fails.
      */
+    /**
+     * Calculate dimensional weight (Desi / Volumetric weight) for a product.
+     *
+     * @since 1.0.0
+     * @param WC_Product $product The product or variation.
+     * @return float Calculated dimensional weight (min 1.0).
+     */
+    public function calculate_dimensional_weight( WC_Product $product ): float {
+        $parent = $product->is_type( 'variation' ) ? wc_get_product( $product->get_parent_id() ) : null;
+
+        $height = (float) $product->get_height();
+        if ( ! $height && $parent ) { $height = (float) $parent->get_height(); }
+
+        $width = (float) $product->get_width();
+        if ( ! $width && $parent ) { $width = (float) $parent->get_width(); }
+
+        $length = (float) $product->get_length();
+        if ( ! $length && $parent ) { $length = (float) $parent->get_length(); }
+
+        $weight = (float) $product->get_weight();
+        if ( ! $weight && $parent ) { $weight = (float) $parent->get_weight(); }
+
+        $vw_calc = ( $height * $width * $length ) / 5000;
+        $val     = max( $vw_calc, $weight );
+
+        return $val > 0 ? round( $val, 2 ) : 1.0;
+    }
+
     public function build_payload( WC_Product $product, bool $is_bulk = false ): array|WP_Error {
         if ( $product->is_type( 'variable' ) ) {
             return new WP_Error(
@@ -1224,22 +1320,23 @@ class Woo_Trendyol_Product_Creator {
 
         // ---- Assemble payload ----
         $payload = [
-            'barcode'          => $barcode, // Resolved via configured barcode source.
-            'title'            => mb_substr( $title, 0, 100 ),
-            'productMainId'    => $product_main_id,
-            'brandId'          => $brand_id,
-            'categoryId'       => $category_id,
-            'quantity'         => $quantity,
-            'stockCode'        => $stock_code,
-            'description'      => $description,
-            'currencyType'     => Woo_Trendyol_API_Client::CURRENCY,
-            'listPrice'        => round( $list_price, 2 ),
-            'salePrice'        => round( $sale_price, 2 ),
-            'vatRate'          => (int) get_option( 'trendyol_default_vat_rate', 24 ),
-            'cargoCompanyId'   => (int) get_option( 'trendyol_default_cargo_company_id', 0 ),
-            'deliveryDuration' => $handling_time,
-            'images'           => $images,
-            'attributes'       => $attributes,
+            'barcode'           => $barcode, // Resolved via configured barcode source.
+            'title'             => mb_substr( $title, 0, 100 ),
+            'productMainId'     => $product_main_id,
+            'brandId'           => $brand_id,
+            'categoryId'        => $category_id,
+            'quantity'          => $quantity,
+            'stockCode'         => $stock_code,
+            'description'       => $description,
+            'currencyType'      => Woo_Trendyol_API_Client::CURRENCY,
+            'listPrice'         => round( $list_price, 2 ),
+            'salePrice'         => round( $sale_price, 2 ),
+            'vatRate'           => (int) get_option( 'trendyol_default_vat_rate', 24 ),
+            'cargoCompanyId'    => (int) get_option( 'trendyol_default_cargo_company_id', 0 ),
+            'deliveryDuration'  => $handling_time,
+            'dimensionalWeight' => $this->calculate_dimensional_weight( $product ),
+            'images'            => $images,
+            'attributes'        => $attributes,
         ];
 
         // Remove cargoCompanyId if not set (Trendyol rejects 0).
