@@ -470,9 +470,14 @@ class Woo_Trendyol_Product_Creator {
             return $result;
         }
 
-        $price_stock_items = [];
-        $item_map = [];
+        $min_price_opt = get_option( 'trendyol_price_rule_min_bulk_push_price', '' );
+        $min_price     = ( '' !== $min_price_opt && is_numeric( $min_price_opt ) ) ? (float) $min_price_opt : null;
 
+        $price_stock_items = [];
+        $item_map          = [];
+
+        // Flatten variable products into variations
+        $flat_products = [];
         foreach ( $product_ids as $product_id ) {
             $product = wc_get_product( $product_id );
             if ( ! $product ) {
@@ -481,44 +486,97 @@ class Woo_Trendyol_Product_Creator {
                 continue;
             }
 
+            if ( $product->is_type( 'variable' ) ) {
+                $children = $product->get_children();
+                if ( empty( $children ) ) {
+                    $result['skipped']++;
+                    $result['errors'][ $product_id ] = __( 'Variable product has no variations.', 'woo-trendyol' );
+                    continue;
+                }
+                foreach ( $children as $child_id ) {
+                    $child = wc_get_product( $child_id );
+                    if ( $child && ( 'publish' === $child->get_status() || 'publish' === get_post_status( $child_id ) ) ) {
+                        $flat_products[] = $child;
+                    }
+                }
+            } else {
+                $flat_products[] = $product;
+            }
+        }
+
+        foreach ( $flat_products as $product ) {
+            $pid     = $product->get_id();
             $barcode = $this->resolve_barcode( $product );
             if ( empty( $barcode ) ) {
                 $result['skipped']++;
-                $result['errors'][ $product_id ] = __( 'Product has no barcode.', 'woo-trendyol' );
+                $result['errors'][ $pid ] = __( 'Product has no barcode.', 'woo-trendyol' );
                 continue;
             }
 
-            $payload = $this->build_payload( $product, true );
-            if ( is_wp_error( $payload ) ) {
+            $prices     = $this->category_helper->get_final_trendyol_prices( $product );
+            $sale_price = (float) $prices['salePrice'];
+            $list_price = (float) $prices['listPrice'];
+
+            if ( null !== $min_price && $sale_price < $min_price ) {
                 $result['skipped']++;
-                $result['errors'][ $product_id ] = $payload->get_error_message();
+                $result['errors'][ $pid ] = sprintf(
+                    __( 'Price %1$s is below the minimum bulk push limit of %2$s.', 'woo-trendyol' ),
+                    number_format( $sale_price, 2 ),
+                    number_format( $min_price, 2 )
+                );
                 continue;
             }
 
-            $price_stock_items[] = [
+            $parent   = $product->is_type( 'variation' ) ? wc_get_product( $product->get_parent_id() ) : null;
+            $quantity = $product->managing_stock()
+                ? max( 0, (int) $product->get_stock_quantity() )
+                : ( ( $parent && $parent->managing_stock() )
+                    ? max( 0, (int) $parent->get_stock_quantity() )
+                    : ( $product->is_in_stock() ? 100 : 0 ) );
+
+            $item = [
                 'barcode'   => $barcode,
-                'quantity'  => $payload['quantity'],
-                'salePrice' => $payload['salePrice'],
-                'listPrice' => $payload['listPrice'],
+                'quantity'  => $quantity,
+                'salePrice' => $sale_price,
+                'listPrice' => $list_price,
             ];
-            $item_map[] = $product_id;
+
+            $lookup_id   = $product->is_type( 'variation' ) ? $product->get_parent_id() : $pid;
+            $category_id = $this->category_helper->get_trendyol_category_id( $lookup_id );
+            if ( ! empty( $category_id ) ) {
+                $item['categoryId'] = (int) $category_id;
+            }
+
+            $price_stock_items[] = $item;
+            $item_map[]          = $pid;
         }
 
         if ( ! empty( $price_stock_items ) ) {
-            $response = $this->api->update_price_and_stock( $price_stock_items );
-            if ( is_wp_error( $response ) ) {
-                $error_msg = $response->get_error_message();
-                foreach ( $item_map as $pid ) {
-                    $result['errors'][ $pid ] = $error_msg;
-                    $result['skipped']++;
-                }
-            } else {
-                $batch_request_id = $response['batchRequestId'] ?? '';
-                if ( $batch_request_id ) {
-                    $result['batches'][] = $batch_request_id;
-                }
-                foreach ( $item_map as $pid ) {
-                    $result['submitted']++;
+            $chunks     = array_chunk( $price_stock_items, 100 );
+            $map_chunks = array_chunk( $item_map, 100 );
+
+            foreach ( $chunks as $c_idx => $c_items ) {
+                $c_map    = $map_chunks[ $c_idx ];
+                $response = $this->api->update_price_and_stock( $c_items );
+
+                if ( is_wp_error( $response ) ) {
+                    $error_msg = $response->get_error_message();
+                    foreach ( $c_map as $pid ) {
+                        $result['errors'][ $pid ] = $error_msg;
+                        $result['skipped']++;
+                    }
+                } else {
+                    $batch_request_id = $response['batchRequestId'] ?? '';
+                    if ( $batch_request_id ) {
+                        $result['batches'][] = $batch_request_id;
+                    }
+                    foreach ( $c_map as $pid ) {
+                        $result['submitted']++;
+                        update_post_meta( $pid, '_trendyol_last_sync', time() );
+                        if ( $batch_request_id ) {
+                            update_post_meta( $pid, '_trendyol_batch_id', $batch_request_id );
+                        }
+                    }
                 }
             }
         }
@@ -1017,6 +1075,21 @@ class Woo_Trendyol_Product_Creator {
 
         $term_id = 0;
         if ( $terms && ! is_wp_error( $terms ) ) {
+            if ( $is_bulk ) {
+                foreach ( $terms as $term ) {
+                    if ( 'yes' === $this->category_helper->get_inherited_term_meta( $term->term_id, 'trendyol_exclude_bulk_push' ) ) {
+                        return new WP_Error(
+                            'excluded_category',
+                            sprintf(
+                                __( 'Product #%d is in category "%s" which is excluded from bulk push.', 'woo-trendyol' ),
+                                $product_id,
+                                $term->name
+                            )
+                        );
+                    }
+                }
+            }
+
             // Use the deepest term that has a Trendyol mapping.
             foreach ( $terms as $term ) {
                 if ( get_term_meta( $term->term_id, 'trendyol_category_id', true ) ) {
