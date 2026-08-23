@@ -87,6 +87,7 @@
             $btn.prop( 'disabled', true ).text( wtBrand.syncingBrands || 'Syncing…' );
             $pauseBtn.prop( 'disabled', false ).show().text( 'Pause' );
             $progressWrap.show();
+            $progressWrap.find( '.wt-keep-tab-open-notice' ).show();
             $progressFill.css( 'width', '0%' );
             $progressText.text( '0 / ?' );
             $totals.hide().empty();
@@ -197,6 +198,7 @@
 
             $btn.prop( 'disabled', false ).text( 'Sync Brands' );
             $pauseBtn.prop( 'disabled', true ).hide();
+            $progressWrap.find( '.wt-keep-tab-open-notice' ).hide();
             $progressFill.css( 'width', '100%' );
             $progressText.text( brandSync.total + ' / ' + brandSync.total );
 

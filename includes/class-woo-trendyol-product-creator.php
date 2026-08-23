@@ -512,14 +512,34 @@ class Woo_Trendyol_Product_Creator {
 
             $pid = $product->get_id();
 
-            // Price & Stock Sync applies ONLY to already pushed products
+            // Check if product was already sent to Trendyol
             $is_sent = 'yes' === get_post_meta( $pid, '_trendyol_sent', true );
             if ( ! $is_sent && $product->is_type( 'variation' ) ) {
                 $is_sent = 'yes' === get_post_meta( $product->get_parent_id(), '_trendyol_sent', true );
             }
-            if ( ! $is_sent ) {
+
+            // Exclude products if their category is excluded from Trendyol
+            $lookup_id = $product->is_type( 'variation' ) ? $product->get_parent_id() : $pid;
+            $terms     = get_the_terms( $lookup_id, 'product_cat' );
+            if ( $terms && ! is_wp_error( $terms ) ) {
+                $is_cat_excluded = false;
+                foreach ( $terms as $term ) {
+                    if ( 'yes' === $this->category_helper->get_inherited_term_meta( $term->term_id, 'trendyol_exclude_bulk_push' ) ) {
+                        $is_cat_excluded = true;
+                        break;
+                    }
+                }
+                if ( $is_cat_excluded ) {
+                    $result['skipped']++;
+                    $result['errors'][ $pid ] = __( 'Category is excluded from Trendyol.', 'woo-trendyol' );
+                    continue;
+                }
+            }
+
+            // If not previously sent, product must be in stock to sync
+            if ( ! $is_sent && ! $product->is_in_stock() ) {
                 $result['skipped']++;
-                $result['errors'][ $pid ] = __( 'Product has not been pushed to Trendyol yet.', 'woo-trendyol' );
+                $result['errors'][ $pid ] = __( 'Product is out of stock and not yet sent to Trendyol.', 'woo-trendyol' );
                 continue;
             }
 

@@ -1891,51 +1891,108 @@ class Woo_Trendyol_Admin {
             'meta_query'     => [],
         ];
 
+        $excluded_terms = get_terms( [
+            'taxonomy'   => 'product_cat',
+            'hide_empty' => false,
+            'fields'     => 'ids',
+            'meta_query' => [
+                [
+                    'key'   => 'trendyol_exclude_bulk_push',
+                    'value' => 'yes',
+                ],
+            ],
+        ] );
+        $has_excluded_terms = ! is_wp_error( $excluded_terms ) && ! empty( $excluded_terms );
+
         if ( 'sync' === $action_type ) {
-            // Price and stock sync applies only to products already pushed to Trendyol
-            $args['meta_query'][] = [
-                'key'     => '_trendyol_sent',
-                'value'   => 'yes',
-                'compare' => '=',
-            ];
-        } elseif ( $only_unmapped ) {
-            $args['meta_query'][] = [
-                'relation' => 'OR',
-                [
-                    'key'     => '_trendyol_sent',
-                    'compare' => 'NOT EXISTS',
-                ],
-                [
-                    'key'     => '_trendyol_sent',
-                    'value'   => 'yes',
-                    'compare' => '!=',
-                ],
-            ];
-        }
-
-        if ( ! $include_out_of_stock ) {
-            $args['meta_query'][] = [
-                'key'     => '_stock_status',
-                'value'   => 'outofstock',
-                'compare' => '!=',
-            ];
-        }
-
-        // For bulk push, exclude categories marked as excluded from bulk push
-        if ( 'push' === $action_type ) {
-            $excluded_terms = get_terms( [
-                'taxonomy'   => 'product_cat',
-                'hide_empty' => false,
-                'fields'     => 'ids',
-                'meta_query' => [
+            // 1. All products already sent to Trendyol
+            $pushed_args = [
+                'post_type'      => 'product',
+                'post_status'    => 'publish',
+                'posts_per_page' => -1,
+                'fields'         => 'ids',
+                'meta_query'     => [
                     [
-                        'key'   => 'trendyol_exclude_bulk_push',
-                        'value' => 'yes',
+                        'key'     => '_trendyol_sent',
+                        'value'   => 'yes',
+                        'compare' => '=',
                     ],
                 ],
-            ] );
+            ];
+            if ( ! $include_out_of_stock ) {
+                $pushed_args['meta_query'][] = [
+                    'key'     => '_stock_status',
+                    'value'   => 'outofstock',
+                    'compare' => '!=',
+                ];
+            }
+            if ( $has_excluded_terms ) {
+                $pushed_args['tax_query'] = [
+                    [
+                        'taxonomy'         => 'product_cat',
+                        'field'            => 'term_id',
+                        'terms'            => $excluded_terms,
+                        'operator'         => 'NOT IN',
+                        'include_children' => true,
+                    ],
+                ];
+            }
+            $pushed_ids = get_posts( $pushed_args );
 
-            if ( ! is_wp_error( $excluded_terms ) && ! empty( $excluded_terms ) ) {
+            // 2. All in-stock products not excluded from Trendyol
+            $instock_args = [
+                'post_type'      => 'product',
+                'post_status'    => 'publish',
+                'posts_per_page' => -1,
+                'fields'         => 'ids',
+                'meta_query'     => [],
+            ];
+            if ( ! $include_out_of_stock ) {
+                $instock_args['meta_query'][] = [
+                    'key'     => '_stock_status',
+                    'value'   => 'outofstock',
+                    'compare' => '!=',
+                ];
+            }
+            if ( $has_excluded_terms ) {
+                $instock_args['tax_query'] = [
+                    [
+                        'taxonomy'         => 'product_cat',
+                        'field'            => 'term_id',
+                        'terms'            => $excluded_terms,
+                        'operator'         => 'NOT IN',
+                        'include_children' => true,
+                    ],
+                ];
+            }
+            $instock_ids = get_posts( $instock_args );
+
+            $product_ids = array_values( array_unique( array_merge( $pushed_ids, $instock_ids ) ) );
+        } else {
+            if ( $only_unmapped ) {
+                $args['meta_query'][] = [
+                    'relation' => 'OR',
+                    [
+                        'key'     => '_trendyol_sent',
+                        'compare' => 'NOT EXISTS',
+                    ],
+                    [
+                        'key'     => '_trendyol_sent',
+                        'value'   => 'yes',
+                        'compare' => '!=',
+                    ],
+                ];
+            }
+
+            if ( ! $include_out_of_stock ) {
+                $args['meta_query'][] = [
+                    'key'     => '_stock_status',
+                    'value'   => 'outofstock',
+                    'compare' => '!=',
+                ];
+            }
+
+            if ( $has_excluded_terms ) {
                 $args['tax_query'] = [
                     [
                         'taxonomy'         => 'product_cat',
@@ -1946,9 +2003,9 @@ class Woo_Trendyol_Admin {
                     ],
                 ];
             }
-        }
 
-        $product_ids = get_posts( $args );
+            $product_ids = get_posts( $args );
+        }
 
         wp_send_json_success( [
             'product_ids'   => array_map( 'intval', $product_ids ),

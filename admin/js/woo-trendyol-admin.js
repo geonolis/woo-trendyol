@@ -320,6 +320,7 @@
             $pauseBtn.prop( 'disabled', false ).show().text( 'Pause' );
             $cancelBtn.show();
             $progressWrap.show();
+            $progressWrap.find( '.wt-keep-tab-open-notice' ).show();
             $progressFill.css( 'width', '0%' );
             $progressText.text( '0 / ?' );
             $currentIds.text( '' );
@@ -457,6 +458,7 @@
             $btn.prop( 'disabled', false ).text( wooTrendyolAdmin.bulkPushText );
             $pauseBtn.prop( 'disabled', true ).hide();
             $cancelBtn.hide();
+            $progressWrap.find( '.wt-keep-tab-open-notice' ).hide();
             $progressFill.css( 'width', '100%' );
             $currentIds.text( 'Done.' );
 
@@ -560,6 +562,7 @@
             $pauseBtn.prop( 'disabled', false ).show().text( 'Pause' );
             $cancelBtn.show();
             $progressWrap.show();
+            $progressWrap.find( '.wt-keep-tab-open-notice' ).show();
             $progressFill.css( 'width', '0%' );
             $progressText.text( '0 / ?' );
             $currentIds.text( '' );
@@ -687,6 +690,7 @@
             $btn.prop( 'disabled', false ).text( 'Sync Price & Stock' );
             $pauseBtn.prop( 'disabled', true ).hide();
             $cancelBtn.hide();
+            $progressWrap.find( '.wt-keep-tab-open-notice' ).hide();
             $progressFill.css( 'width', '100%' );
             $currentIds.text( 'Done.' );
 
@@ -769,6 +773,7 @@
             $cancelBtn.show();
             $spinner.addClass( 'is-active' );
             $progressWrap.show();
+            $progressWrap.find( '.wt-keep-tab-open-notice' ).show();
             $progressFill.css( 'width', '0%' );
             $progressText.text( '0 / ?' );
             $currentIds.text( 'Fetching unapproved products list...' );
@@ -904,6 +909,7 @@
             $pauseBtn.hide();
             $resumeBtn.hide();
             $cancelBtn.hide();
+            $progressWrap.find( '.wt-keep-tab-open-notice' ).hide();
             $progressFill.css( 'width', '100%' );
             $currentIds.text( 'Done.' );
 
