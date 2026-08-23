@@ -505,7 +505,19 @@ class Woo_Trendyol_Product_Creator {
         }
 
         foreach ( $flat_products as $product ) {
-            $pid     = $product->get_id();
+            $pid = $product->get_id();
+
+            // Price & Stock Sync applies ONLY to already pushed products
+            $is_sent = 'yes' === get_post_meta( $pid, '_trendyol_sent', true );
+            if ( ! $is_sent && $product->is_type( 'variation' ) ) {
+                $is_sent = 'yes' === get_post_meta( $product->get_parent_id(), '_trendyol_sent', true );
+            }
+            if ( ! $is_sent ) {
+                $result['skipped']++;
+                $result['errors'][ $pid ] = __( 'Product has not been pushed to Trendyol yet.', 'woo-trendyol' );
+                continue;
+            }
+
             $barcode = $this->resolve_barcode( $product );
             if ( empty( $barcode ) ) {
                 $result['skipped']++;

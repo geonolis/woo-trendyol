@@ -1891,7 +1891,14 @@ class Woo_Trendyol_Admin {
             'meta_query'     => [],
         ];
 
-        if ( $only_unmapped ) {
+        if ( 'sync' === $action_type ) {
+            // Price and stock sync applies only to products already pushed to Trendyol
+            $args['meta_query'][] = [
+                'key'     => '_trendyol_sent',
+                'value'   => 'yes',
+                'compare' => '=',
+            ];
+        } elseif ( $only_unmapped ) {
             $args['meta_query'][] = [
                 'relation' => 'OR',
                 [
