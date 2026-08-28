@@ -304,7 +304,7 @@ class Woo_Trendyol_API_Client {
                 'trendyol_not_found',
                 sprintf(
                     /* translators: %s: product barcode */
-                    __( 'Product with barcode "%s" not found on Trendyol.', 'woo-trendyol' ),
+                    __( 'Product with barcode "%s" was not found in your Trendyol inventory (neither approved nor unapproved). Please verify that the barcode/GTIN is correct and that the product exists on Trendyol.', 'woo-trendyol' ),
                     $barcode
                 )
             );

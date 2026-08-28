@@ -786,12 +786,13 @@ class Woo_Trendyol_Product_Creator {
             'errors'    => [],
         ];
 
-        $approved_items    = [];
-        $unapproved_items  = [];
-        $price_stock_items = [];
+        $approved_items      = [];
+        $unapproved_items    = [];
+        $price_stock_items   = [];
+        $to_create_fallback  = [];
         
-        $content_id_map    = [];
-        $barcode_map       = [];
+        $content_id_map      = [];
+        $barcode_map         = [];
 
         foreach ( $product_ids as $product_id ) {
             $product = wc_get_product( $product_id );
@@ -810,8 +811,13 @@ class Woo_Trendyol_Product_Creator {
 
             $trendyol_product = $this->api->get_product_base( $barcode );
             if ( is_wp_error( $trendyol_product ) ) {
+                if ( 'trendyol_not_found' === $trendyol_product->get_error_code() ) {
+                    // Product is not on Trendyol yet (or was deleted/rejected) — fallback to sending as a new product.
+                    $to_create_fallback[] = $product_id;
+                    continue;
+                }
                 $result['skipped']++;
-                $result['errors'][ $product_id ] = sprintf( __( 'Could not find product on Trendyol: %s', 'woo-trendyol' ), $trendyol_product->get_error_message() );
+                $result['errors'][ $product_id ] = $trendyol_product->get_error_message();
                 continue;
             }
 
@@ -882,6 +888,21 @@ class Woo_Trendyol_Product_Creator {
                 ];
                 $barcode_map[ $barcode ] = $product_id;
             }
+        }
+
+        // Fallback: If products were not found in Trendyol inventory, create and send them as new products.
+        if ( ! empty( $to_create_fallback ) ) {
+            $this->logger->info(
+                sprintf(
+                    '%d product(s) marked as sent locally but not found on Trendyol. Sending as new product(s) to Trendyol.',
+                    count( $to_create_fallback )
+                )
+            );
+            $create_res = $this->create_products_batch( $to_create_fallback, $is_bulk );
+            $result['submitted'] += $create_res['submitted'];
+            $result['skipped']   += $create_res['skipped'];
+            $result['batches']    = array_merge( $result['batches'], $create_res['batches'] );
+            $result['errors']     = $result['errors'] + $create_res['errors'];
         }
 
         if ( empty( $approved_items ) && empty( $unapproved_items ) ) {
