@@ -127,11 +127,40 @@ $display_path = ! empty( $trendyol_path )
                                 <div style="display: flex; flex-direction: column; align-items: flex-start; gap: 8px;">
                                     <select name="trendyol_attribute_mappings[<?php echo esc_attr( $attr_id ); ?>]" id="trendyol_attr_<?php echo esc_attr( $attr_id ); ?>" style="width: 100%; max-width: 400px; min-width: 250px;">
                                         <option value=""><?php esc_html_e( '-- Select WooCommerce Attribute --', 'woo-trendyol' ); ?></option>
-                                        <?php foreach ( $woo_attributes as $woo_attr ) : ?>
-                                            <option value="<?php echo esc_attr( 'pa_' . $woo_attr->attribute_name ); ?>" <?php selected( $current_mapping, 'pa_' . $woo_attr->attribute_name ); ?>>
-                                                <?php echo esc_html( $woo_attr->attribute_label ); ?>
-                                            </option>
-                                        <?php endforeach; ?>
+                                        
+                                        <?php if ( ! empty( $woo_attributes ) ) : ?>
+                                            <optgroup label="<?php esc_attr_e( 'Global Product Attributes (pa_*)', 'woo-trendyol' ); ?>">
+                                                <?php foreach ( $woo_attributes as $woo_attr ) : ?>
+                                                    <option value="<?php echo esc_attr( 'pa_' . $woo_attr->attribute_name ); ?>" <?php selected( $current_mapping, 'pa_' . $woo_attr->attribute_name ); ?>>
+                                                        <?php echo esc_html( $woo_attr->attribute_label ); ?> (pa_<?php echo esc_attr( $woo_attr->attribute_name ); ?>)
+                                                    </option>
+                                                <?php endforeach; ?>
+                                            </optgroup>
+                                        <?php endif; ?>
+
+                                        <?php if ( ! empty( $custom_attributes ) ) : ?>
+                                            <optgroup label="<?php esc_attr_e( 'Custom Product Attributes', 'woo-trendyol' ); ?>">
+                                                <?php foreach ( $custom_attributes as $c_slug => $c_label ) : ?>
+                                                    <option value="<?php echo esc_attr( $c_slug ); ?>" <?php selected( $current_mapping, $c_slug ); ?>>
+                                                        <?php echo esc_html( $c_label ); ?> (<?php echo esc_html( $c_slug ); ?>)
+                                                    </option>
+                                                <?php endforeach; ?>
+                                            </optgroup>
+                                        <?php endif; ?>
+
+                                        <?php 
+                                        $known_keys = array_merge(
+                                            array_map( static fn( $a ) => 'pa_' . $a->attribute_name, $woo_attributes ?? [] ),
+                                            array_keys( $custom_attributes ?? [] )
+                                        );
+                                        if ( ! empty( $current_mapping ) && ! in_array( $current_mapping, $known_keys, true ) ) : 
+                                        ?>
+                                            <optgroup label="<?php esc_attr_e( 'Custom Source', 'woo-trendyol' ); ?>">
+                                                <option value="<?php echo esc_attr( $current_mapping ); ?>" selected="selected">
+                                                    <?php echo esc_html( $current_mapping ); ?>
+                                                </option>
+                                            </optgroup>
+                                        <?php endif; ?>
                                     </select>
 
                                     <?php if ( $is_globally_mapped ) : ?>
@@ -145,10 +174,15 @@ $display_path = ! empty( $trendyol_path )
                                 </div>
 
                                 <?php 
-                                if ( ! empty( $current_mapping ) && taxonomy_exists( $current_mapping ) ) :
+                                if ( ! empty( $current_mapping ) && ! empty( $attr['allowCustom'] ) ) :
+                                ?>
+                                    <div class="wt-custom-values-notice" style="margin-top: 10px; padding: 8px 12px; background: #f0f6fb; border-left: 4px solid #11a0d2; font-size: 11px; color: #50575e;">
+                                        <?php esc_html_e( 'This attribute allows custom values. Individual value mapping is not required; values from your selected WooCommerce attribute will be sent directly to Trendyol.', 'woo-trendyol' ); ?>
+                                    </div>
+                                <?php 
+                                elseif ( ! empty( $current_mapping ) && taxonomy_exists( $current_mapping ) && ! empty( $attr['values'] ) ) :
                                     $woo_terms = get_terms( [ 'taxonomy' => $current_mapping, 'hide_empty' => false ] );
                                     if ( ! is_wp_error( $woo_terms ) && ! empty( $woo_terms ) ) :
-                                        if ( ! empty( $attr['values'] ) ) :
                                 ?>
                                     <div class="wt-value-mappings" style="margin-top: 10px; padding: 10px; background: #f9f9f9; border: 1px solid #ddd; max-height: 250px; overflow-y: auto;">
                                         <strong><?php esc_html_e( 'Map Values:', 'woo-trendyol' ); ?></strong>
@@ -184,13 +218,6 @@ $display_path = ! empty( $trendyol_path )
                                         </table>
                                     </div>
                                 <?php 
-                                        elseif ( ! empty( $attr['allowCustom'] ) ) :
-                                ?>
-                                    <div class="wt-custom-values-notice" style="margin-top: 10px; padding: 8px 12px; background: #f0f6fb; border-left: 4px solid #11a0d2; font-size: 11px; color: #50575e;">
-                                        <?php esc_html_e( 'This attribute allows custom values. Individual value mapping is not required; your WooCommerce term names will be sent directly.', 'woo-trendyol' ); ?>
-                                    </div>
-                                <?php
-                                        endif;
                                     endif;
                                 endif; 
                                 ?>

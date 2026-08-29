@@ -363,6 +363,13 @@ class Woo_Trendyol_Attribute_Mapper {
             $normalised_slug = $this->normalise_slug( $mapped_wc_slug );
             $wc_value        = $wc_attributes[ $normalised_slug ] ?? null;
 
+            if ( empty( $wc_value ) ) {
+                $direct_val = $product->get_attribute( $mapped_wc_slug );
+                if ( ! empty( $direct_val ) ) {
+                    $wc_value = $direct_val;
+                }
+            }
+
             if ( $wc_value ) {
                 return $this->match_value( $attr_id, $wc_value, $attr_values, $allow_custom );
             }
@@ -872,5 +879,69 @@ class Woo_Trendyol_Attribute_Mapper {
         $slug = strtolower( $slug );
         $slug = str_replace( [ '-', '_' ], ' ', $slug );
         return trim( $slug );
+    }
+
+    /**
+     * Retrieve all custom (non-taxonomy) product attributes across WooCommerce products.
+     *
+     * @since 1.0.0
+     * @return array Associative array of [ slug => label ].
+     */
+    public static function get_custom_product_attributes(): array {
+        $cached = get_transient( 'trendyol_custom_product_attributes' );
+        if ( false !== $cached && is_array( $cached ) ) {
+            return $cached;
+        }
+
+        global $wpdb;
+        $results = $wpdb->get_col(
+            $wpdb->prepare(
+                "SELECT meta_value FROM {$wpdb->postmeta} WHERE meta_key = %s AND meta_value LIKE %s",
+                '_product_attributes',
+                '%is_taxonomy%0%'
+            )
+        );
+
+        $custom_attrs = [];
+        if ( ! empty( $results ) ) {
+            foreach ( $results as $meta_value ) {
+                $attrs = maybe_unserialize( $meta_value );
+                if ( is_array( $attrs ) ) {
+                    foreach ( $attrs as $key => $attr_data ) {
+                        if ( empty( $attr_data['is_taxonomy'] ) ) {
+                            $slug = sanitize_title( $key );
+                            $name = ! empty( $attr_data['name'] ) ? $attr_data['name'] : $key;
+                            $custom_attrs[ $slug ] = $name;
+                        }
+                    }
+                }
+            }
+        }
+
+        if ( empty( $custom_attrs ) ) {
+            $results_all = $wpdb->get_col(
+                $wpdb->prepare(
+                    "SELECT meta_value FROM {$wpdb->postmeta} WHERE meta_key = %s LIMIT 200",
+                    '_product_attributes'
+                )
+            );
+            if ( ! empty( $results_all ) ) {
+                foreach ( $results_all as $meta_value ) {
+                    $attrs = maybe_unserialize( $meta_value );
+                    if ( is_array( $attrs ) ) {
+                        foreach ( $attrs as $key => $attr_data ) {
+                            if ( empty( $attr_data['is_taxonomy'] ) ) {
+                                $slug = sanitize_title( $key );
+                                $name = ! empty( $attr_data['name'] ) ? $attr_data['name'] : $key;
+                                $custom_attrs[ $slug ] = $name;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        set_transient( 'trendyol_custom_product_attributes', $custom_attrs, 12 * HOUR_IN_SECONDS );
+        return $custom_attrs;
     }
 }

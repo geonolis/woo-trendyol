@@ -174,8 +174,9 @@ class Woo_Trendyol_Taxonomy {
         $attribute_value_mappings = get_term_meta( $term->term_id, '_trendyol_attribute_value_mappings', true );
         $attribute_value_mappings = is_array( $attribute_value_mappings ) ? $attribute_value_mappings : [];
 
-        // We also need all WooCommerce attributes to populate dropdowns
-        $woo_attributes = wc_get_attribute_taxonomies();
+        // We also need all WooCommerce attributes and custom attributes to populate dropdowns
+        $woo_attributes    = wc_get_attribute_taxonomies();
+        $custom_attributes = Woo_Trendyol_Attribute_Mapper::get_custom_product_attributes();
 
         include WOO_TRENDYOL_PATH . 'admin/partials/woo-trendyol-taxonomy-edit.php';
     }
