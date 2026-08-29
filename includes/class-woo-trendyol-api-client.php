@@ -207,7 +207,7 @@ class Woo_Trendyol_API_Client {
      *  - categoryId     (int)     Trendyol leaf-level category ID
      *  - quantity       (int)     Stock quantity
      *  - stockCode      (string)  Warehouse stock code
-     *  - description    (string)  Plain-text product description
+     *  - description    (string)  Product description (safe HTML or plain text)
      *  - currencyType   (string)  Always 'EUR' for international sellers
      *  - listPrice      (float)   List price (must be >= salePrice)
      *  - salePrice      (float)   Sale price

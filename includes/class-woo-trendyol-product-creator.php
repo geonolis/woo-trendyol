@@ -31,7 +31,7 @@ if ( ! defined( 'WPINC' ) ) {
  *  - categoryId      — resolved via Category_Helper (4-tier priority)
  *  - quantity        — WC stock quantity
  *  - stockCode       — WC product SKU
- *  - description     — WC short description or description (plain text, max 500 chars)
+ *  - description     — WC short description or description (safe HTML, max 30,000 chars)
  *  - currencyType    — always 'EUR' (Woo_Trendyol_API_Client::CURRENCY)
  *  - listPrice       — WC regular price
  *  - salePrice       — WC sale price or regular price
@@ -1458,15 +1458,16 @@ class Woo_Trendyol_Product_Creator {
     }
 
     /**
-     * Build a plain-text product description suitable for Trendyol.
+     * Build a product description suitable for Trendyol.
      *
      * Uses main description first, falls back to short description.
-     * Strips HTML tags and limits to 500 characters.
+     * Processes WPBakery / WordPress shortcodes if present, sanitizes
+     * with wp_kses_post() to preserve safe HTML formatting, and enforces Trendyol's 30,000 char cap.
      *
      * @since  1.0.0
      * @access private
      * @param  WC_Product $product The WooCommerce product.
-     * @return string Plain-text description.
+     * @return string Sanitized HTML description.
      */
     private function build_description( WC_Product $product ): string {
         $raw = $product->get_description();
@@ -1485,11 +1486,37 @@ class Woo_Trendyol_Product_Creator {
             $raw = $product->get_short_description();
         }
 
-        $plain = wp_strip_all_tags( $raw );
-        $plain = preg_replace( '/\s+/', ' ', $plain );
-        $plain = trim( $plain );
+        if ( empty( $raw ) ) {
+            return '';
+        }
 
-        return mb_substr( $plain, 0, 500 );
+        // Initialize WPBakery shortcodes if WPBakery Page Builder is active.
+        if ( class_exists( 'WPBMap' ) && method_exists( 'WPBMap', 'addAllMappedShortcodes' ) ) {
+            \WPBMap::addAllMappedShortcodes();
+        }
+
+        // Process WPBakery and any standard WordPress shortcodes.
+        $processed = do_shortcode( $raw );
+
+        // Strip any remaining unhandled shortcodes to avoid leaking raw tags.
+        $processed = strip_shortcodes( $processed );
+
+        // Preserve safe HTML formatting (p, br, strong, ul, li, h1-h6, table, etc.) while stripping unsafe tags.
+        $clean = wp_kses_post( $processed );
+        $clean = trim( $clean );
+
+        // Trendyol API allows descriptions up to 30,000 characters.
+        $description = mb_substr( $clean, 0, 30000 );
+
+        /**
+         * Filter the product description sent to Trendyol.
+         *
+         * @since 1.0.0
+         * @param string     $description The sanitized product description.
+         * @param WC_Product $product     The WooCommerce product object.
+         * @param string     $raw         The original raw description.
+         */
+        return apply_filters( 'woo_trendyol_product_description', $description, $product, $raw );
     }
 
     /**
