@@ -3348,22 +3348,72 @@ class Woo_Trendyol_Admin {
                                 $is_globally_mapped = true;
                             }
                         }
+                                            $is_custom    = ! empty( $attr['allowCustom'] );
+                        $values_count = count( $attr['values'] ?? [] );
                     ?>
-                        <tr>
-                            <th scope="row">
-                                <label for="trendyol_attr_<?php echo esc_attr( $attr_id ); ?>">
+                        <tr style="border-bottom: 1px solid #f0f0f1;">
+                            <th scope="row" style="vertical-align: top; padding: 15px 10px 15px 0; width: 230px;">
+                                <label for="trendyol_attr_<?php echo esc_attr( $attr_id ); ?>" style="font-weight: 600; font-size: 13px; display: block;">
                                     <?php echo esc_html( $attr_name ); ?>
+                                    <span style="font-size: 11px; font-weight: normal; color: #777; display: block; margin-top: 2px;">
+                                        (Trendyol ID: <strong><?php echo esc_html( $attr_id ); ?></strong>)
+                                    </span>
                                 </label>
+
+                                <?php if ( $is_custom ) : ?>
+                                    <span class="wt-badge wt-badge-custom" style="display: inline-block; margin-top: 6px; padding: 3px 8px; font-size: 11px; line-height: 1.3; background: #e7f5ea; color: #1e7e34; border: 1px solid #c3e6cb; border-radius: 3px; font-weight: 600;">
+                                        &#x2714; <?php esc_html_e( 'Free Text / Slicer', 'woo-trendyol' ); ?>
+                                    </span>
+                                    <span style="display: block; font-size: 11px; color: #666; font-weight: normal; margin-top: 3px; line-height: 1.3;">
+                                        <?php esc_html_e( 'Accepts custom variation values (e.g. Σχέδιο)', 'woo-trendyol' ); ?>
+                                    </span>
+                                <?php else : ?>
+                                    <span class="wt-badge wt-badge-predefined" style="display: inline-block; margin-top: 6px; padding: 3px 8px; font-size: 11px; line-height: 1.3; background: #f0f0f1; color: #3c434a; border: 1px solid #d6d8db; border-radius: 3px; font-weight: 600;">
+                                        &#x25C6; <?php esc_html_e( 'Predefined List', 'woo-trendyol' ); ?>
+                                    </span>
+                                    <span style="display: block; font-size: 11px; color: #666; font-weight: normal; margin-top: 3px; line-height: 1.3;">
+                                        <?php printf( esc_html__( 'Fixed Trendyol list (%d options)', 'woo-trendyol' ), $values_count ); ?>
+                                    </span>
+                                <?php endif; ?>
                             </th>
                             <td>
                                 <div style="display: flex; flex-direction: column; align-items: flex-start; gap: 8px;">
                                     <select name="trendyol_attribute_mappings[<?php echo esc_attr( $attr_id ); ?>]" id="trendyol_attr_<?php echo esc_attr( $attr_id ); ?>" style="width: 100%; max-width: 400px; min-width: 250px;">
                                         <option value=""><?php esc_html_e( '-- Select WooCommerce Attribute --', 'woo-trendyol' ); ?></option>
-                                        <?php foreach ( $woo_attributes as $woo_attr ) : ?>
-                                            <option value="<?php echo esc_attr( 'pa_' . $woo_attr->attribute_name ); ?>" <?php selected( $current_mapping, 'pa_' . $woo_attr->attribute_name ); ?>>
-                                                <?php echo esc_html( $woo_attr->attribute_label ); ?>
-                                            </option>
-                                        <?php endforeach; ?>
+                                        
+                                        <?php if ( ! empty( $woo_attributes ) ) : ?>
+                                            <optgroup label="<?php esc_attr_e( 'Global Product Attributes (pa_*)', 'woo-trendyol' ); ?>">
+                                                <?php foreach ( $woo_attributes as $woo_attr ) : ?>
+                                                    <option value="<?php echo esc_attr( 'pa_' . $woo_attr->attribute_name ); ?>" <?php selected( $current_mapping, 'pa_' . $woo_attr->attribute_name ); ?>>
+                                                        <?php echo esc_html( $woo_attr->attribute_label ); ?> (pa_<?php echo esc_attr( $woo_attr->attribute_name ); ?>)
+                                                    </option>
+                                                <?php endforeach; ?>
+                                            </optgroup>
+                                        <?php endif; ?>
+
+                                        <?php if ( ! empty( $custom_attributes ) ) : ?>
+                                            <optgroup label="<?php esc_attr_e( 'Custom Product Attributes', 'woo-trendyol' ); ?>">
+                                                <?php foreach ( $custom_attributes as $c_slug => $c_label ) : ?>
+                                                    <option value="<?php echo esc_attr( $c_slug ); ?>" <?php selected( $current_mapping, $c_slug ); ?>>
+                                                        <?php echo esc_html( $c_label ); ?> (<?php echo esc_html( $c_slug ); ?>)
+                                                    </option>
+                                                <?php endforeach; ?>
+                                            </optgroup>
+                                        <?php endif; ?>
+
+                                        <?php 
+                                        $known_keys = array_merge(
+                                            array_map( static fn( $a ) => 'pa_' . $a->attribute_name, $woo_attributes ?? [] ),
+                                            array_keys( $custom_attributes ?? [] )
+                                        );
+                                        if ( ! empty( $current_mapping ) && ! in_array( $current_mapping, $known_keys, true ) ) : 
+                                        ?>
+                                            <optgroup label="<?php esc_attr_e( 'Custom Source', 'woo-trendyol' ); ?>">
+                                                <option value="<?php echo esc_attr( $current_mapping ); ?>" selected="selected">
+                                                    <?php echo esc_html( $current_mapping ); ?>
+                                                </option>
+                                            </optgroup>
+                                        <?php endif; ?>
                                     </select>
 
                                     <?php if ( $is_globally_mapped ) : ?>

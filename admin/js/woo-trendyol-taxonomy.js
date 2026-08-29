@@ -289,7 +289,20 @@
                 }
             } );
 
-            if ( ! attrData || ! attrData.values || attrData.values.length === 0 ) {
+            if ( ! attrData ) {
+                return;
+            }
+
+            if ( attrData.allowCustom ) {
+                $td.find( '.wt-value-mappings, .wt-custom-values-notice' ).remove();
+                var html = '<div class="wt-custom-values-notice" style="margin-top: 10px; padding: 8px 12px; background: #f0f6fb; border-left: 4px solid #11a0d2; font-size: 11px; color: #50575e;">';
+                html += 'This attribute allows custom values (free text / slicer). Individual value mapping is not required; values from your selected WooCommerce attribute will be sent directly to Trendyol.';
+                html += '</div>';
+                $td.append( html );
+                return;
+            }
+
+            if ( ! attrData.values || attrData.values.length === 0 ) {
                 return;
             }
 
