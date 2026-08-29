@@ -167,11 +167,13 @@ class Woo_Trendyol_Attribute_Mapper {
             $attr_id   = (int) ( $cat_attr['attribute']['id']   ?? 0 );
             $attr_name = (string) ( $cat_attr['attribute']['name'] ?? '' );
             
-            $is_required = ! empty( $cat_attr['required'] );
-            $is_brand    = ( $this->get_global_slot( $attr_name ) === 'brand' );
+            $is_required            = ! empty( $cat_attr['required'] );
+            $is_category_mapped     = ! empty( $category_map[ (string) $attr_id ] );
+            $is_dyn_globally_mapped = ! empty( get_option( 'trendyol_global_attr_' . $attr_id . '_wc', '' ) );
+            $is_slot_mapped         = ( null !== $this->get_global_slot( $attr_name ) );
 
-            // Skip optional attributes entirely unless they match the global brand slot.
-            if ( ! $is_required && ! $is_brand ) {
+            // Include all required attributes, plus any optional attributes that are mapped globally or per-category.
+            if ( ! $is_required && ! $is_category_mapped && ! $is_dyn_globally_mapped && ! $is_slot_mapped ) {
                 continue;
             }
 
