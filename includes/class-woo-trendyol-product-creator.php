@@ -1192,18 +1192,6 @@ class Woo_Trendyol_Product_Creator {
             );
         }
 
-        // ---- Resolve Trendyol productMainId and stockCode ----
-        // For variations: productMainId must be the parent product SKU (or parent ID if no SKU).
-        // For simple products: productMainId is product SKU (or product ID if no SKU).
-        if ( $product->is_type( 'variation' ) && $parent ) {
-            $parent_sku      = (string) $parent->get_sku();
-            $product_main_id = ! empty( $parent_sku ) ? $parent_sku : (string) $parent_id;
-            $stock_code      = ! empty( $sku ) ? $sku : ( ! empty( $barcode ) ? $barcode : (string) $product_id );
-        } else {
-            $product_main_id = ! empty( $sku ) ? $sku : ( ! empty( $barcode ) ? $barcode : (string) $product_id );
-            $stock_code      = ! empty( $sku ) ? $sku : ( ! empty( $barcode ) ? $barcode : (string) $product_id );
-        }
-
         // ---- Resolve Trendyol category ----
         $category_id = (int) $this->category_helper->get_trendyol_category_id( $product_id );
         if ( ! $category_id && $parent_id ) {
@@ -1219,6 +1207,22 @@ class Woo_Trendyol_Product_Creator {
                     $product_id
                 )
             );
+        }
+
+        // ---- Resolve Trendyol productMainId and stockCode ----
+        // Check if variation should be split into individual standalone products on Trendyol
+        $is_split_variation = false;
+        if ( $product->is_type( 'variation' ) && $parent ) {
+            $is_split_variation = $this->category_helper->should_split_variations( $parent_id, $category_id );
+        }
+
+        if ( $product->is_type( 'variation' ) && $parent && ! $is_split_variation ) {
+            $parent_sku      = (string) $parent->get_sku();
+            $product_main_id = ! empty( $parent_sku ) ? $parent_sku : (string) $parent_id;
+            $stock_code      = ! empty( $sku ) ? $sku : ( ! empty( $barcode ) ? $barcode : (string) $product_id );
+        } else {
+            $product_main_id = ! empty( $sku ) ? $sku : ( ! empty( $barcode ) ? $barcode : (string) $product_id );
+            $stock_code      = ! empty( $sku ) ? $sku : ( ! empty( $barcode ) ? $barcode : (string) $product_id );
         }
 
         // ---- Resolve term ID for attribute mapping ----
@@ -1296,7 +1300,7 @@ class Woo_Trendyol_Product_Creator {
                 : ( $product->is_in_stock() ? 100 : 0 ) );
 
         // ---- Images ----
-        $images = $this->build_image_array( $product );
+        $images = $this->build_image_array( $product, ! empty( $is_split_variation ) );
         if ( empty( $images ) ) {
             return new WP_Error(
                 'missing_images',
@@ -1337,6 +1341,15 @@ class Woo_Trendyol_Product_Creator {
         }
         if ( empty( $title ) ) {
             $title = $product->get_name();
+        }
+
+        // If variation is split into standalone product, ensure variation attribute value is in title
+        if ( ! empty( $is_split_variation ) && $parent ) {
+            $var_attrs = $product->get_attributes();
+            $var_suffix = ! empty( $var_attrs ) ? implode( ' ', array_values( $var_attrs ) ) : '';
+            if ( ! empty( $var_suffix ) && mb_stripos( $title, $var_suffix ) === false ) {
+                $title = $title . ' - ' . $var_suffix;
+            }
         }
 
         // ---- Assemble payload ----
@@ -1397,7 +1410,7 @@ class Woo_Trendyol_Product_Creator {
      * @param  WC_Product $product The WooCommerce product.
      * @return array Array of image objects.
      */
-    private function build_image_array( WC_Product $product ): array {
+    private function build_image_array( WC_Product $product, bool $is_split_variation = false ): array {
         $images     = [];
         $image_ids  = [];
 
@@ -1407,26 +1420,37 @@ class Woo_Trendyol_Product_Creator {
             $image_ids[] = $featured_id;
         }
 
-        // If variation, also include parent product featured and gallery images.
-        if ( $product->is_type( 'variation' ) || $product->get_parent_id() ) {
-            $parent = wc_get_product( $product->get_parent_id() );
-            if ( $parent ) {
-                $parent_featured_id = $parent->get_image_id();
-                if ( $parent_featured_id && ! in_array( $parent_featured_id, $image_ids, true ) ) {
-                    $image_ids[] = $parent_featured_id;
-                }
-                foreach ( $parent->get_gallery_image_ids() as $id ) {
-                    if ( ! in_array( $id, $image_ids, true ) ) {
-                        $image_ids[] = $id;
-                    }
-                }
-            }
-        }
-
         // Gallery images on the product itself.
         foreach ( $product->get_gallery_image_ids() as $id ) {
             if ( ! in_array( $id, $image_ids, true ) ) {
                 $image_ids[] = $id;
+            }
+        }
+
+        // If variation, handle parent product images:
+        if ( $product->is_type( 'variation' ) || $product->get_parent_id() ) {
+            $parent = wc_get_product( $product->get_parent_id() );
+            if ( $parent ) {
+                if ( $is_split_variation ) {
+                    // When splitting variations, only use parent image as fallback if variation has NO image at all.
+                    if ( empty( $image_ids ) ) {
+                        $parent_featured_id = $parent->get_image_id();
+                        if ( $parent_featured_id ) {
+                            $image_ids[] = $parent_featured_id;
+                        }
+                    }
+                } else {
+                    // When variations are grouped, include parent featured and gallery images.
+                    $parent_featured_id = $parent->get_image_id();
+                    if ( $parent_featured_id && ! in_array( $parent_featured_id, $image_ids, true ) ) {
+                        $image_ids[] = $parent_featured_id;
+                    }
+                    foreach ( $parent->get_gallery_image_ids() as $id ) {
+                        if ( ! in_array( $id, $image_ids, true ) ) {
+                            $image_ids[] = $id;
+                        }
+                    }
+                }
             }
         }
 

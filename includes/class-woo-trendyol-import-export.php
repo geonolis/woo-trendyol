@@ -53,6 +53,7 @@ class Woo_Trendyol_Import_Export {
             'trendyol_global_attr_names_cache',
 
             // Product Defaults & Barcode settings
+            'trendyol_split_variations_without_slicers',
             'trendyol_barcode_source',
             'trendyol_barcode_meta_key',
             'trendyol_barcode_attr_slug',

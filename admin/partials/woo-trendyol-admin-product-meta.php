@@ -76,6 +76,11 @@ if ( 'success' === $sync_status ) {
                     <?php if ( ! empty( $category_id ) ) : ?>
                         <code class="wt-code"><?php echo esc_html( $category_id ); ?></code>
                         <span class="wt-source-label">(<?php echo esc_html( $category_source ); ?>)</span>
+                        <?php if ( ! empty( $category_supports_slicers ) ) : ?>
+                            <span class="wt-badge wt-badge--success" style="margin-left: 6px; font-size: 11px;"><?php esc_html_e( 'Supports Variations / Slicers', 'woo-trendyol' ); ?></span>
+                        <?php else : ?>
+                            <span class="wt-badge wt-badge--warning" style="margin-left: 6px; font-size: 11px; background: #fff3cd; color: #856404; border: 1px solid #ffeeba;"><?php esc_html_e( 'No Variation / Slicer Support', 'woo-trendyol' ); ?></span>
+                        <?php endif; ?>
                     <?php else : ?>
                         <span class="wt-badge wt-badge--warning"><?php esc_html_e( 'Not mapped', 'woo-trendyol' ); ?></span>
                     <?php endif; ?>
@@ -88,6 +93,55 @@ if ( 'success' === $sync_status ) {
             </tr>
             <?php endif; ?>
         </table>
+
+        <?php if ( ! empty( $is_variable ) && ! empty( $category_id ) && empty( $category_supports_slicers ) ) : ?>
+            <div class="wt-slicer-warning-box" style="margin: 12px 0; padding: 12px 14px; background: #fff8e5; border-left: 4px solid #ffb900; border-radius: 2px;">
+                <div style="font-weight: 600; color: #855a00; margin-bottom: 4px; display: flex; align-items: center; gap: 6px;">
+                    <span class="dashicons dashicons-warning" style="color: #dba617; font-size: 18px; line-height: 1;"></span>
+                    <?php esc_html_e( 'Category Does Not Support Variations / Slicers on Trendyol', 'woo-trendyol' ); ?>
+                </div>
+                <p style="margin: 0 0 6px; font-size: 12px; line-height: 1.4; color: #555;">
+                    <?php printf(
+                        esc_html__( 'Trendyol Category %1$s has no variation slicers (Color/Size/Pattern/Σχέδιο). On Trendyol, items in this category cannot be displayed under one product card with variation dropdown buttons.', 'woo-trendyol' ),
+                        '<strong>#' . esc_html( $category_id ) . '</strong>'
+                    ); ?>
+                </p>
+                <div style="font-size: 12px; color: #333; line-height: 1.4;">
+                    <strong><?php esc_html_e( 'Current behavior:', 'woo-trendyol' ); ?></strong>
+                    <?php
+                    $is_active_split = ( 'yes' === $force_split ) || ( '' === $force_split && 'no' !== $global_split_setting );
+                    if ( $is_active_split ) {
+                        echo '<span style="color: #1b6d2e; font-weight: 600;"> ' . esc_html__( 'Each variation will be created as a separate standalone product on Trendyol with its full variation name.', 'woo-trendyol' ) . '</span>';
+                    } else {
+                        echo '<span style="color: #a00; font-weight: 600;"> ' . esc_html__( 'Variations will be sent grouped together under the parent SKU (Trendyol will reject duplicate variations).', 'woo-trendyol' ) . '</span>';
+                    }
+                    ?>
+                </div>
+            </div>
+        <?php endif; ?>
+
+        <?php if ( ! empty( $is_variable ) ) : ?>
+            <!-- Variation Splitting Option -->
+            <div class="wt-override-field" style="margin-top: 15px;">
+                <label for="_trendyol_force_split_variations">
+                    <strong><?php esc_html_e( 'Variation Splitting Behavior', 'woo-trendyol' ); ?></strong>
+                </label>
+                <select id="_trendyol_force_split_variations" name="_trendyol_force_split_variations" style="width: 100%; max-width: 400px;">
+                    <option value="" <?php selected( $force_split, '' ); ?>>
+                        <?php printf( esc_html__( 'Follow Global Default (%s)', 'woo-trendyol' ), ( 'no' === $global_split_setting ? esc_html__( 'Do Not Split', 'woo-trendyol' ) : esc_html__( 'Split if Category Lacks Slicers', 'woo-trendyol' ) ) ); ?>
+                    </option>
+                    <option value="yes" <?php selected( $force_split, 'yes' ); ?>>
+                        <?php esc_html_e( 'Force Split into Individual Standalone Products', 'woo-trendyol' ); ?>
+                    </option>
+                    <option value="no" <?php selected( $force_split, 'no' ); ?>>
+                        <?php esc_html_e( 'Do Not Split (Keep Grouped Under Parent SKU)', 'woo-trendyol' ); ?>
+                    </option>
+                </select>
+                <p class="description">
+                    <?php esc_html_e( 'Choose whether to push child variations as individual standalone listings on Trendyol or keep them grouped under the parent product.', 'woo-trendyol' ); ?>
+                </p>
+            </div>
+        <?php endif; ?>
 
         <!-- Category override field (editable) -->
         <div class="wt-override-field">

@@ -228,6 +228,91 @@ class Woo_Trendyol_Category_Helper {
         return get_term_meta( $term_id, $meta_key, true ); // Fallback to raw if unmapped
     }
 
+    /**
+     * Check if a Trendyol category supports variation slicers (free text / custom / predefined slicer).
+     *
+     * @since 1.1.0
+     * @param int $category_id Trendyol category ID.
+     * @return bool True if the category schema provides at least one slicer or custom variation attribute.
+     */
+    public function category_supports_slicers( int $category_id ): bool {
+        if ( ! $category_id ) {
+            return false;
+        }
+
+        $cache_key = "wt_cat_supports_slicers_" . $category_id;
+        $cached    = get_transient( $cache_key );
+        if ( false !== $cached ) {
+            return (bool) $cached;
+        }
+
+        $api = new Woo_Trendyol_API_Client( new Woo_Trendyol_Logger() );
+        $schema = $api->get_category_attributes( $category_id );
+
+        if ( is_wp_error( $schema ) || empty( $schema["categoryAttributes"] ) ) {
+            set_transient( $cache_key, 0, DAY_IN_SECONDS );
+            return false;
+        }
+
+        $variant_keywords = [
+            "χρωμα", "χρώμα", "renk", "color",
+            "μεγεθος", "μέγεθος", "beden", "size", "ebat", "numara",
+            "σχεδιο", "σχέδιο", "desen", "pattern", "model",
+        ];
+
+        $supports = false;
+        foreach ( $schema["categoryAttributes"] as $attr ) {
+            if ( ! empty( $attr["slicer"] ) ) {
+                $supports = true;
+                break;
+            }
+
+            $name_lower = mb_strtolower( trim( $attr["attribute"]["name"] ?? "" ) );
+            foreach ( $variant_keywords as $kw ) {
+                if ( mb_stripos( $name_lower, $kw ) !== false ) {
+                    $supports = true;
+                    break 2;
+                }
+            }
+        }
+
+        set_transient( $cache_key, $supports ? 1 : 0, DAY_IN_SECONDS );
+        return $supports;
+    }
+
+    /**
+     * Determine whether variations for a given product should be split into individual standalone products.
+     *
+     * Priority:
+     * 1. Product-level override (_trendyol_force_split_variations: "yes" -> split, "no" -> do not split)
+     * 2. If category lacks slicer support AND global setting "trendyol_split_variations_without_slicers" !== "no" -> split.
+     *
+     * @since 1.1.0
+     * @param int $product_id Post ID of parent or variation product.
+     * @param int $category_id Resolved Trendyol category ID.
+     * @return bool True if variations should be split.
+     */
+    public function should_split_variations( int $product_id, int $category_id ): bool {
+        $parent_id   = wp_get_post_parent_id( $product_id ) ?: $product_id;
+        $force_split = get_post_meta( $parent_id, "_trendyol_force_split_variations", true );
+
+        if ( "yes" === $force_split ) {
+            return true;
+        }
+        if ( "no" === $force_split ) {
+            return false;
+        }
+
+        // Check if category lacks slicers
+        $supports_slicers = $this->category_supports_slicers( $category_id );
+        if ( ! $supports_slicers ) {
+            $global_split = get_option( "trendyol_split_variations_without_slicers", "yes" );
+            return "yes" === $global_split;
+        }
+
+        return false;
+    }
+
     // -----------------------------------------------------------------------
     // Private resolution helpers
     // -----------------------------------------------------------------------

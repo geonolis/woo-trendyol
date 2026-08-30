@@ -312,6 +312,11 @@ class Woo_Trendyol_Admin {
             'trendyol_barcode_attr_slug',
             [ 'sanitize_callback' => 'sanitize_text_field' ]
         );
+        register_setting(
+            'woo_trendyol_defaults_settings',
+            'trendyol_split_variations_without_slicers',
+            [ 'sanitize_callback' => 'sanitize_key', 'default' => 'yes' ]
+        );
 
         add_settings_section(
             'woo_trendyol_defaults_section',
@@ -321,11 +326,12 @@ class Woo_Trendyol_Admin {
         );
 
         $default_fields = [
-            [ 'trendyol_default_order_status',     __( 'Default Order Status', 'woo-trendyol' ), 'render_field_default_order_status' ],
-            [ 'trendyol_barcode_source',           __( 'Barcode Source',      'woo-trendyol' ), 'render_field_barcode_source'  ],
-            [ 'trendyol_default_cargo_company_id', __( 'Cargo Company ID',    'woo-trendyol' ), 'render_field_cargo_company'   ],
-            [ 'trendyol_default_vat_rate',         __( 'VAT Rate (%)',        'woo-trendyol' ), 'render_field_vat_rate'        ],
-            [ 'trendyol_handling_time_type',       __( 'Handling Time',       'woo-trendyol' ), 'render_field_handling_time'   ],
+            [ 'trendyol_default_order_status',             __( 'Default Order Status', 'woo-trendyol' ),             'render_field_default_order_status' ],
+            [ 'trendyol_barcode_source',                   __( 'Barcode Source',      'woo-trendyol' ),             'render_field_barcode_source'  ],
+            [ 'trendyol_split_variations_without_slicers', __( 'Split Variations Without Slicers', 'woo-trendyol' ), 'render_field_split_variations' ],
+            [ 'trendyol_default_cargo_company_id',         __( 'Cargo Company ID',    'woo-trendyol' ),             'render_field_cargo_company'   ],
+            [ 'trendyol_default_vat_rate',                 __( 'VAT Rate (%)',        'woo-trendyol' ),             'render_field_vat_rate'        ],
+            [ 'trendyol_handling_time_type',               __( 'Handling Time',       'woo-trendyol' ),             'render_field_handling_time'   ],
         ];
 
         foreach ( $default_fields as [ $id, $label, $callback ] ) {
@@ -771,6 +777,27 @@ class Woo_Trendyol_Admin {
      * @since  1.0.0
      * @param  array $args Field arguments passed by add_settings_field().
      */
+    /**
+     * Render the Split Variations Without Slicers field.
+     *
+     * @since 1.1.0
+     * @param array $args Field arguments.
+     */
+    public function render_field_split_variations( array $args ): void {
+        $value = get_option( 'trendyol_split_variations_without_slicers', 'yes' );
+        ?>
+        <label for="trendyol_split_variations_without_slicers">
+            <select id="trendyol_split_variations_without_slicers" name="trendyol_split_variations_without_slicers">
+                <option value="yes" <?php selected( $value, 'yes' ); ?>><?php esc_html_e( 'Yes — Split into individual standalone products (Recommended)', 'woo-trendyol' ); ?></option>
+                <option value="no" <?php selected( $value, 'no' ); ?>><?php esc_html_e( 'No — Keep parent grouping (Trendyol may reject duplicate variations)', 'woo-trendyol' ); ?></option>
+            </select>
+        </label>
+        <p class="description">
+            <?php esc_html_e( 'When a WooCommerce variable product is mapped to a Trendyol category that does not support variation slicers (e.g. Category 4507), enabling this option automatically sends each variation as an individual standalone product on Trendyol so all items are published successfully.', 'woo-trendyol' ); ?>
+        </p>
+        <?php
+    }
+
     public function render_field_barcode_source( array $args ): void {
         $source   = get_option( 'trendyol_barcode_source', 'sku' );
         $meta_key = get_option( 'trendyol_barcode_meta_key', '' );
@@ -1489,8 +1516,11 @@ class Woo_Trendyol_Admin {
             ? __( 'Product override', 'woo-trendyol' )
             : __( 'Category mapping', 'woo-trendyol' );
 
-        // ---- Price override ----
-        $price_override  = get_post_meta( $post_id, '_trendyol_price_override', true );
+        // ---- Price override & Variation split override ----
+        $price_override            = get_post_meta( $post_id, '_trendyol_price_override', true );
+        $force_split               = get_post_meta( $post_id, '_trendyol_force_split_variations', true );
+        $category_supports_slicers = ! empty( $category_id ) ? $this->category_helper->category_supports_slicers( (int) $category_id ) : true;
+        $global_split_setting      = get_option( 'trendyol_split_variations_without_slicers', 'yes' );
 
         // ---- Calculated price display & Variable product breakdown ----
         $calculated_price_display = '';
@@ -1686,6 +1716,16 @@ class Woo_Trendyol_Admin {
             update_post_meta( $post_id, '_trendyol_price_override', $price_override );
         } else {
             delete_post_meta( $post_id, '_trendyol_price_override' );
+        }
+
+        $force_split = isset( $_POST['_trendyol_force_split_variations'] )
+            ? sanitize_text_field( wp_unslash( $_POST['_trendyol_force_split_variations'] ) )
+            : '';
+
+        if ( in_array( $force_split, [ 'yes', 'no' ], true ) ) {
+            update_post_meta( $post_id, '_trendyol_force_split_variations', $force_split );
+        } else {
+            delete_post_meta( $post_id, '_trendyol_force_split_variations' );
         }
     }
 
