@@ -393,6 +393,7 @@ class Woo_Trendyol {
         $this->loader->add_action( 'woocommerce_variation_set_stock',       $product_sync, 'on_product_stock_set',  10, 1 );
         $this->loader->add_action( 'woocommerce_reduce_order_stock',         $product_sync, 'on_order_stock_reduced', 10, 1 );
         $this->loader->add_action( 'woocommerce_restore_order_stock',        $product_sync, 'on_order_stock_restored', 10, 1 );
+        $this->loader->add_action( 'update_option_trendyol_holiday_mode',     $product_sync, 'on_holiday_mode_toggled', 10, 3 );
 
         // Order sync (polling + status notifications).
         $order_sync = new Woo_Trendyol_Order_Sync(

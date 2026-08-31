@@ -19,6 +19,8 @@ if ( ! defined( 'WP_UNINSTALL_PLUGIN' ) ) {
 // Remove all plugin options from wp_options.
 $options = [
     'trendyol_api_active',
+    'trendyol_holiday_mode',
+    'trendyol_holiday_pending_products',
     'trendyol_seller_id',
     'trendyol_api_key',
     'trendyol_api_secret',

@@ -3,8 +3,9 @@
  * Admin settings page partial template — tabbed layout.
  *
  * Variables injected from Woo_Trendyol_Admin::render_settings_page():
- *  @var bool   $is_active   Whether the API connection is currently active.
- *  @var string $active_tab  The currently active tab slug.
+ *  @var bool   $is_active       Whether the API connection is currently active.
+ *  @var bool   $is_holiday_mode Whether holiday mode is currently active.
+ *  @var string $active_tab      The currently active tab slug.
  *
  * @link    https://developers.trendyol.com
  * @since   1.0.0
@@ -34,6 +35,25 @@ $tabs = [
     </h1>
 
     <?php
+    $synced_notice = get_transient( 'trendyol_holiday_synced_notice' );
+    if ( false !== $synced_notice ) :
+        delete_transient( 'trendyol_holiday_synced_notice' );
+    ?>
+        <div class="notice notice-success is-dismissible" style="margin: 15px 0;">
+            <p>
+                <strong><?php esc_html_e( 'Holiday Mode Deactivated:', 'woo-trendyol' ); ?></strong>
+                <?php
+                printf(
+                    /* translators: %d: number of synced products */
+                    esc_html__( 'Smart Change-Tracking Queue successfully pushed %d queued product stock/price update(s) to Trendyol.', 'woo-trendyol' ),
+                    (int) $synced_notice
+                );
+                ?>
+            </p>
+        </div>
+    <?php
+    endif;
+
     if ( 'credentials' === $active_tab ) {
         settings_errors( 'woo_trendyol_api_settings' );
     } elseif ( 'defaults' === $active_tab ) {
@@ -46,16 +66,24 @@ $tabs = [
     ?>
 
     <!-- Connection status banner -->
-    <div class="wt-connection-banner <?php echo $is_active ? 'wt-connection-banner--active' : 'wt-connection-banner--inactive'; ?>">
-        <span class="wt-connection-dot"></span>
-        <?php if ( $is_active ) : ?>
-            <strong><?php esc_html_e( 'Integration Active', 'woo-trendyol' ); ?></strong>
-            &mdash; <?php esc_html_e( 'Product sync and order polling are running. Currency: EUR (International/Greek marketplace).', 'woo-trendyol' ); ?>
-        <?php else : ?>
-            <strong><?php esc_html_e( 'Integration Inactive', 'woo-trendyol' ); ?></strong>
-            &mdash; <?php esc_html_e( 'Enter your credentials and enable the toggle to activate.', 'woo-trendyol' ); ?>
-        <?php endif; ?>
-    </div>
+    <?php if ( $is_holiday_mode ) : ?>
+        <div class="wt-connection-banner wt-connection-banner--holiday">
+            <span class="wt-connection-dot"></span>
+            <strong><?php esc_html_e( 'Holiday Mode Active', 'woo-trendyol' ); ?></strong>
+            &mdash; <?php esc_html_e( 'Automatic product synchronization and order polling are currently paused.', 'woo-trendyol' ); ?>
+        </div>
+    <?php else : ?>
+        <div class="wt-connection-banner <?php echo $is_active ? 'wt-connection-banner--active' : 'wt-connection-banner--inactive'; ?>">
+            <span class="wt-connection-dot"></span>
+            <?php if ( $is_active ) : ?>
+                <strong><?php esc_html_e( 'Integration Active', 'woo-trendyol' ); ?></strong>
+                &mdash; <?php esc_html_e( 'Product sync and order polling are running. Currency: EUR (International/Greek marketplace).', 'woo-trendyol' ); ?>
+            <?php else : ?>
+                <strong><?php esc_html_e( 'Integration Inactive', 'woo-trendyol' ); ?></strong>
+                &mdash; <?php esc_html_e( 'Enter your credentials and enable the toggle to activate.', 'woo-trendyol' ); ?>
+            <?php endif; ?>
+        </div>
+    <?php endif; ?>
 
     <!-- Tab navigation (native WP nav-tab style) -->
     <nav class="nav-tab-wrapper wt-nav-tab-wrapper">
@@ -308,7 +336,12 @@ $tabs = [
             <div class="wt-card wt-card--test">
                 <h3><?php esc_html_e( 'Connection Status', 'woo-trendyol' ); ?></h3>
                 <p>
-                    <?php if ( $is_active ) : ?>
+                    <?php if ( $is_holiday_mode ) : ?>
+                        <span class="wt-status-badge wt-status-badge--warning" style="background:#fff8e5; color:#7a5c00; border:1px solid #f0b849;">
+                            <span class="dashicons dashicons-palmtree"></span>
+                            <?php esc_html_e( 'Holiday Mode Active', 'woo-trendyol' ); ?>
+                        </span>
+                    <?php elseif ( $is_active ) : ?>
                         <span class="wt-status-badge wt-status-badge--success">
                             <span class="dashicons dashicons-yes-alt"></span>
                             <?php esc_html_e( 'Connected', 'woo-trendyol' ); ?>

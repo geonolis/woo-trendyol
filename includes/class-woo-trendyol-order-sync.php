@@ -220,6 +220,11 @@ class Woo_Trendyol_Order_Sync {
             return;
         }
 
+        if ( $this->api->is_holiday_mode() ) {
+            $this->logger->info( 'Order polling skipped: Holiday mode is active.' );
+            return;
+        }
+
         // Determine the time window: last poll → now.
         $last_poll  = (int) get_option( 'trendyol_last_order_poll', 0 );
         $now        = time();

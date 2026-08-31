@@ -163,6 +163,11 @@ class Woo_Trendyol_Product_Sync {
             return;
         }
 
+        if ( $this->api->is_holiday_mode() ) {
+            $this->add_to_holiday_queue( $product->get_id() );
+            return;
+        }
+
         $product_id = $product->get_id();
 
         /*
@@ -212,6 +217,11 @@ class Woo_Trendyol_Product_Sync {
             return;
         }
 
+        if ( $this->api->is_holiday_mode() ) {
+            $this->add_to_holiday_queue( $post_id );
+            return;
+        }
+
         $this->sync_price_and_stock( $product );
     }
 
@@ -225,6 +235,11 @@ class Woo_Trendyol_Product_Sync {
      */
     public function on_product_stock_set( WC_Product $product ): void {
         if ( ! $this->api->is_active() ) {
+            return;
+        }
+
+        if ( $this->api->is_holiday_mode() ) {
+            $this->add_to_holiday_queue( $product->get_id() );
             return;
         }
 
@@ -244,6 +259,11 @@ class Woo_Trendyol_Product_Sync {
             return;
         }
 
+        if ( $this->api->is_holiday_mode() ) {
+            $this->queue_order_items_stock( $order );
+            return;
+        }
+
         $this->sync_order_items_stock( $order );
     }
 
@@ -257,6 +277,11 @@ class Woo_Trendyol_Product_Sync {
      */
     public function on_order_stock_restored( WC_Order|int $order ): void {
         if ( ! $this->api->is_active() ) {
+            return;
+        }
+
+        if ( $this->api->is_holiday_mode() ) {
+            $this->queue_order_items_stock( $order );
             return;
         }
 
@@ -345,6 +370,10 @@ class Woo_Trendyol_Product_Sync {
             return;
         }
 
+        if ( $this->api->is_holiday_mode() ) {
+            return;
+        }
+
         // Find products that use this attachment as their featured image.
         $products_with_featured = $this->get_products_by_thumbnail( $attachment_id );
 
@@ -360,6 +389,145 @@ class Woo_Trendyol_Product_Sync {
                 $this->sync_images( $product );
             }
         }
+    }
+
+    // -----------------------------------------------------------------------
+    // Holiday Mode Smart Queue & Catch-Up Sync
+    // -----------------------------------------------------------------------
+
+    /**
+     * Add a product or variation ID to the holiday mode pending sync queue.
+     *
+     * @since 1.0.0
+     * @param int $product_id Product or variation ID.
+     */
+    public function add_to_holiday_queue( int $product_id ): void {
+        $queue = get_option( 'trendyol_holiday_pending_products', [] );
+        if ( ! is_array( $queue ) ) {
+            $queue = [];
+        }
+
+        if ( ! in_array( $product_id, $queue, true ) ) {
+            $queue[] = $product_id;
+            update_option( 'trendyol_holiday_pending_products', $queue, false );
+            $this->logger->info( sprintf( 'Product #%d added to Holiday Mode pending sync queue. (Queued total: %d)', $product_id, count( $queue ) ) );
+        }
+    }
+
+    /**
+     * Queue all products in an order during holiday mode.
+     *
+     * @since 1.0.0
+     * @param WC_Order|int $order Order object or ID.
+     */
+    public function queue_order_items_stock( WC_Order|int $order ): void {
+        if ( is_numeric( $order ) ) {
+            $order = wc_get_order( $order );
+        }
+        if ( ! $order instanceof WC_Order ) {
+            return;
+        }
+        foreach ( $order->get_items() as $item ) {
+            if ( $item instanceof WC_Order_Item_Product ) {
+                $product = $item->get_product();
+                if ( $product ) {
+                    $this->add_to_holiday_queue( $product->get_id() );
+                }
+            }
+        }
+    }
+
+    /**
+     * Action handler when trendyol_holiday_mode option is changed.
+     * Triggers the smart catch-up sync when holiday mode is turned OFF.
+     *
+     * @since 1.0.0
+     * @param mixed  $old_value Previous option value.
+     * @param mixed  $new_value New option value.
+     * @param string $option    Option name.
+     */
+    public function on_holiday_mode_toggled( mixed $old_value, mixed $new_value, string $option = '' ): void {
+        if ( 'yes' === $old_value && 'yes' !== $new_value ) {
+            $this->process_holiday_queue();
+        }
+    }
+
+    /**
+     * Process and sync all pending products accumulated during holiday mode.
+     *
+     * @since 1.0.0
+     * @return int Number of items successfully synced.
+     */
+    public function process_holiday_queue(): int {
+        $queue = get_option( 'trendyol_holiday_pending_products', [] );
+        if ( empty( $queue ) || ! is_array( $queue ) ) {
+            delete_option( 'trendyol_holiday_pending_products' );
+            return 0;
+        }
+
+        $this->logger->info( sprintf( 'Holiday Mode turned OFF. Processing %d queued pending products...', count( $queue ) ) );
+
+        $all_items = [];
+        foreach ( $queue as $product_id ) {
+            $product = wc_get_product( $product_id );
+            if ( ! $product || 'trash' === $product->get_status() ) {
+                continue;
+            }
+
+            if ( $product->is_type( 'variable' ) ) {
+                /** @var WC_Product_Variable $product */
+                foreach ( $product->get_children() as $variation_id ) {
+                    $variation = wc_get_product( $variation_id );
+                    if ( $variation && 'trash' !== $variation->get_status() ) {
+                        $item = $this->build_price_stock_item( $variation );
+                        if ( $item ) {
+                            $all_items[] = $item;
+                        }
+                    }
+                }
+            } else {
+                $item = $this->build_price_stock_item( $product );
+                if ( $item ) {
+                    $all_items[] = $item;
+                }
+            }
+        }
+
+        // Deduplicate items by barcode
+        $unique_items = [];
+        foreach ( $all_items as $item ) {
+            $barcode = $item['barcode'] ?? '';
+            if ( ! empty( $barcode ) ) {
+                $unique_items[ $barcode ] = $item;
+            }
+        }
+        $unique_items = array_values( $unique_items );
+
+        if ( empty( $unique_items ) ) {
+            delete_option( 'trendyol_holiday_pending_products' );
+            $this->logger->info( 'Holiday pending queue contained no syncable items with valid barcodes.' );
+            return 0;
+        }
+
+        // Push in chunks of 50
+        $chunks       = array_chunk( $unique_items, 50 );
+        $synced_count = 0;
+
+        foreach ( $chunks as $chunk ) {
+            $response = $this->api->update_price_and_stock( $chunk );
+            if ( is_wp_error( $response ) ) {
+                $this->logger->error( sprintf( 'Holiday queue catch-up sync batch failed: %s', $response->get_error_message() ) );
+            } else {
+                $batch_id = $response['batchRequestId'] ?? '';
+                $synced_count += count( $chunk );
+                $this->logger->info( sprintf( 'Holiday queue catch-up synced %d item(s). Batch ID: %s', count( $chunk ), $batch_id ) );
+            }
+        }
+
+        delete_option( 'trendyol_holiday_pending_products' );
+        set_transient( 'trendyol_holiday_synced_notice', $synced_count, 60 );
+
+        return $synced_count;
     }
 
     // -----------------------------------------------------------------------

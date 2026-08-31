@@ -76,6 +76,7 @@ class Woo_Trendyol_Import_Export {
             'trendyol_price_rule_vw_over_3_coef',
             'trendyol_price_rule_vw_zero_dimensions_amount',
             'trendyol_price_rule_min_bulk_push_price',
+            'trendyol_holiday_mode',
         ];
 
         // Gather all options starting with trendyol_global_attr_ from database (dynamic discovered attributes)

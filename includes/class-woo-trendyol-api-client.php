@@ -121,6 +121,15 @@ class Woo_Trendyol_API_Client {
     private string $integration_reference_code;
 
     /**
+     * Whether holiday mode is enabled in plugin settings.
+     *
+     * @since  1.0.0
+     * @access private
+     * @var    bool $holiday_mode
+     */
+    private bool $holiday_mode;
+
+    /**
      * Whether the API connection is enabled in plugin settings.
      *
      * @since  1.0.0
@@ -148,11 +157,22 @@ class Woo_Trendyol_API_Client {
         $this->storefront_code            = ! empty( $code ) ? $code : 'GR';
         $this->integration_reference_code = (string) get_option( 'trendyol_integration_reference_code', '' );
         $this->active                     = 'yes' === get_option( 'trendyol_api_active', 'no' );
+        $this->holiday_mode               = 'yes' === get_option( 'trendyol_holiday_mode', 'no' );
     }
 
     // -----------------------------------------------------------------------
     // Utility
     // -----------------------------------------------------------------------
+
+    /**
+     * Check whether holiday mode is enabled.
+     *
+     * @since 1.0.0
+     * @return bool True when holiday mode is enabled.
+     */
+    public function is_holiday_mode(): bool {
+        return $this->holiday_mode;
+    }
 
     /**
      * Check whether the API connection is active and credentials are set.

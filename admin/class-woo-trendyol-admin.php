@@ -237,6 +237,7 @@ class Woo_Trendyol_Admin {
         // ---- Section 1: API Credentials ----
         $api_options = [
             'trendyol_api_active',
+            'trendyol_holiday_mode',
             'trendyol_seller_id',
             'trendyol_api_key',
             'trendyol_api_secret',
@@ -257,7 +258,8 @@ class Woo_Trendyol_Admin {
         );
 
         $api_fields = [
-            [ 'trendyol_api_active',                __( 'Enable Integration',        'woo-trendyol' ), 'render_field_toggle'   ],
+            [ 'trendyol_api_active',                __( 'Enable Integration',        'woo-trendyol' ), 'render_field_toggle'       ],
+            [ 'trendyol_holiday_mode',              __( 'Holiday Mode',              'woo-trendyol' ), 'render_field_holiday_mode' ],
             [ 'trendyol_seller_id',                 __( 'Seller ID',                 'woo-trendyol' ), 'render_field_text'     ],
             [ 'trendyol_api_key',                   __( 'API Key',                   'woo-trendyol' ), 'render_field_text'     ],
             [ 'trendyol_api_secret',                __( 'API Secret',                'woo-trendyol' ), 'render_field_password' ],
@@ -520,7 +522,8 @@ class Woo_Trendyol_Admin {
             $active_tab = 'credentials';
         }
 
-        $is_active = $this->api->is_active();
+        $is_active       = $this->api->is_active();
+        $is_holiday_mode = $this->api->is_holiday_mode();
 
         include WOO_TRENDYOL_PATH . 'admin/partials/woo-trendyol-admin-settings.php';
     }
@@ -593,6 +596,53 @@ class Woo_Trendyol_Admin {
                 ? '<span class="wt-badge wt-badge--success">' . esc_html__( 'Active', 'woo-trendyol' ) . '</span>'
                 : '<span class="wt-badge wt-badge--inactive">' . esc_html__( 'Inactive', 'woo-trendyol' ) . '</span>'; ?>
         </span>
+        <?php
+    }
+
+    /**
+     * Render the Holiday Mode toggle field.
+     *
+     * @since 1.0.0
+     */
+    public function render_field_holiday_mode(): void {
+        $value        = get_option( 'trendyol_holiday_mode', 'no' );
+        $queue        = get_option( 'trendyol_holiday_pending_products', [] );
+        $queued_count = is_array( $queue ) ? count( $queue ) : 0;
+        ?>
+        <label class="wt-toggle-switch">
+            <input type="checkbox"
+                   id="trendyol_holiday_mode"
+                   name="trendyol_holiday_mode"
+                   value="yes"
+                   <?php checked( $value, 'yes' ); ?> />
+            <span class="wt-toggle-slider"></span>
+        </label>
+        <span class="wt-toggle-label">
+            <?php echo 'yes' === $value
+                ? '<span class="wt-badge wt-badge--warning">' . esc_html__( 'Active', 'woo-trendyol' ) . '</span>'
+                : '<span class="wt-badge wt-badge--inactive">' . esc_html__( 'Disabled', 'woo-trendyol' ) . '</span>'; ?>
+        </span>
+        <p class="description" style="margin-top: 6px;">
+            <?php esc_html_e( 'Temporarily pause automatic stock/price syncing and order polling while away on holiday or during store maintenance.', 'woo-trendyol' ); ?>
+        </p>
+        <p class="description" style="margin-top: 4px; color: #1d2327;">
+            <span class="dashicons dashicons-update" style="font-size: 15px; width: 15px; height: 15px; vertical-align: -2px; color: #2271b1;"></span>
+            <strong><?php esc_html_e( 'Smart Change-Tracking Queue:', 'woo-trendyol' ); ?></strong>
+            <?php esc_html_e( 'All product stock and price updates made in WooCommerce while Holiday Mode is active are automatically queued. Turning Holiday Mode OFF will instantly trigger a background catch-up sync to push all queued changes to Trendyol.', 'woo-trendyol' ); ?>
+            <?php if ( 'yes' === $value && $queued_count > 0 ) : ?>
+                <br />
+                <span class="wt-badge wt-badge--pending" style="margin-top: 6px;">
+                    <span class="dashicons dashicons-hourglass" style="font-size: 12px; width: 12px; height: 12px; vertical-align: -1px;"></span>
+                    <?php
+                    printf(
+                        /* translators: %d: number of queued products */
+                        esc_html__( '%d modified product(s) in queue &mdash; will sync automatically upon deactivation.', 'woo-trendyol' ),
+                        $queued_count
+                    );
+                    ?>
+                </span>
+            <?php endif; ?>
+        </p>
         <?php
     }
 
