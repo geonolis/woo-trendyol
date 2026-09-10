@@ -3623,8 +3623,8 @@ class Woo_Trendyol_Admin {
      */
     private function is_product_edit_page( string $hook_suffix ): bool {
         return in_array( $hook_suffix, [ 'post.php', 'post-new.php' ], true )
-            && isset( $_GET['post'] )
-            && 'product' === get_post_type( absint( $_GET['post'] ) );
+            && isset( $_GET['post'] ) // phpcs:ignore WordPress.Security.NonceVerification.Recommended
+            && 'product' === get_post_type( absint( $_GET['post'] ) ); // phpcs:ignore WordPress.Security.NonceVerification.Recommended
     }
 
     // -----------------------------------------------------------------------

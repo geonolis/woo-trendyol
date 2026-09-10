@@ -88,8 +88,8 @@ class Woo_Trendyol_Brand_Admin {
     public function enqueue_scripts( string $hook_suffix ): void {
         $is_brand_screen = (
             in_array( $hook_suffix, [ 'edit-tags.php', 'term.php' ], true ) &&
-            isset( $_GET['taxonomy'] ) &&
-            'product_brand' === sanitize_key( $_GET['taxonomy'] )
+            isset( $_GET['taxonomy'] ) && // phpcs:ignore WordPress.Security.NonceVerification.Recommended
+            'product_brand' === sanitize_key( $_GET['taxonomy'] ) // phpcs:ignore WordPress.Security.NonceVerification.Recommended
         );
 
         $is_settings_screen = (
@@ -328,6 +328,12 @@ class Woo_Trendyol_Brand_Admin {
      * @since 1.0.0
      */
     public function ajax_sync_brands(): void {
+        check_ajax_referer( 'woo_trendyol_admin', 'nonce' );
+
+        if ( ! current_user_can( 'manage_woocommerce' ) ) {
+            wp_send_json_error( [ 'message' => __( 'Permission denied.', 'woo-trendyol' ) ] );
+        }
+
         $step = isset( $_POST['step'] ) ? sanitize_key( $_POST['step'] ) : '';
 
         if ( 'get_brands' === $step ) {

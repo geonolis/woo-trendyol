@@ -237,10 +237,11 @@ class Woo_Trendyol_Taxonomy {
 
         // Save attribute mappings.
         if ( isset( $_POST['trendyol_attribute_mappings'] ) && is_array( $_POST['trendyol_attribute_mappings'] ) ) {
-            $mappings = [];
-            foreach ( $_POST['trendyol_attribute_mappings'] as $attr_id => $woo_attr ) {
-                $attr_id = sanitize_text_field( wp_unslash( $attr_id ) );
-                $woo_attr = sanitize_text_field( wp_unslash( $woo_attr ) );
+            $raw_mappings = (array) wp_unslash( $_POST['trendyol_attribute_mappings'] );
+            $mappings     = [];
+            foreach ( $raw_mappings as $attr_id => $woo_attr ) {
+                $attr_id  = sanitize_text_field( $attr_id );
+                $woo_attr = sanitize_text_field( $woo_attr );
                 if ( ! empty( $woo_attr ) ) {
                     $mappings[ $attr_id ] = $woo_attr;
                 }
@@ -252,13 +253,14 @@ class Woo_Trendyol_Taxonomy {
 
         // Save attribute value mappings.
         if ( isset( $_POST['trendyol_attribute_value_mappings'] ) && is_array( $_POST['trendyol_attribute_value_mappings'] ) ) {
-            $value_mappings = [];
-            foreach ( $_POST['trendyol_attribute_value_mappings'] as $attr_id => $terms_map ) {
-                $attr_id = sanitize_text_field( wp_unslash( $attr_id ) );
+            $raw_value_mappings = (array) wp_unslash( $_POST['trendyol_attribute_value_mappings'] );
+            $value_mappings     = [];
+            foreach ( $raw_value_mappings as $attr_id => $terms_map ) {
+                $attr_id = sanitize_text_field( $attr_id );
                 if ( is_array( $terms_map ) ) {
                     foreach ( $terms_map as $woo_term_slug => $ty_val_id ) {
                         $woo_term_slug = sanitize_title( $woo_term_slug );
-                        $ty_val_id     = sanitize_text_field( wp_unslash( $ty_val_id ) );
+                        $ty_val_id     = sanitize_text_field( $ty_val_id );
                         if ( '' !== $ty_val_id ) {
                             $value_mappings[ $attr_id ][ $woo_term_slug ] = $ty_val_id;
                         }

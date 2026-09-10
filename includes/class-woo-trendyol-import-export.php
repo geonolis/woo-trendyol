@@ -194,7 +194,12 @@ class Woo_Trendyol_Import_Export {
             wp_send_json_error( [ 'message' => __( 'No file uploaded.', 'woo-trendyol' ) ] );
         }
 
-        $file_content = file_get_contents( $_FILES['import_file']['tmp_name'] );
+        $tmp_name = isset( $_FILES['import_file']['tmp_name'] ) ? sanitize_text_field( wp_unslash( $_FILES['import_file']['tmp_name'] ) ) : '';
+        if ( empty( $tmp_name ) || ! is_uploaded_file( $tmp_name ) ) {
+            wp_send_json_error( [ 'message' => __( 'Invalid file upload.', 'woo-trendyol' ) ] );
+        }
+
+        $file_content = file_get_contents( $tmp_name );
         $data = json_decode( $file_content, true );
 
         if ( ! is_array( $data ) ) {
