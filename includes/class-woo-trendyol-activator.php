@@ -36,7 +36,6 @@ class Woo_Trendyol_Activator {
         // Set default options only if they do not already exist.
         $defaults = [
             'trendyol_api_active'          => 'no',
-            'trendyol_holiday_mode'        => 'no',
             'trendyol_seller_id'           => '',
             'trendyol_api_key'             => '',
             'trendyol_api_secret'          => '',
