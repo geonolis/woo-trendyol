@@ -387,11 +387,14 @@ class Woo_Trendyol_Admin {
                 $clean_name = preg_replace( '/\s*\(\s*Free Text\s*\)/i', '', (string) ( $g_attr['name'] ?? '' ) );
                 add_settings_field(
                     $wc_opt,
+                    /* translators: %s: Attribute name */
                     sprintf( __( '%s — WooCommerce Attribute', 'woo-trendyol' ), esc_html( $clean_name ) ),
                     function( $args ) use ( $attr_id, $g_attr, $clean_name, $wc_opt, $map_opt ) {
+                        /* translators: %s: Attribute name */
                         $desc = sprintf( __( 'Map WooCommerce terms to Trendyol values for %s.', 'woo-trendyol' ), esc_html( $clean_name ) );
                         if ( ! empty( $g_attr['categories'] ) ) {
                             $cat_names = array_unique( $g_attr['categories'] );
+                            /* translators: %s: Comma-separated category names */
                             $desc .= '<br><span style="font-size: 11px; color: #666;">' . sprintf( __( 'Mandatory in categories: %s', 'woo-trendyol' ), esc_html( implode( ', ', $cat_names ) ) ) . '</span>';
                         }
                         
@@ -737,7 +740,7 @@ class Woo_Trendyol_Admin {
         printf(
             '<input type="number" id="%1$s" name="%1$s" value="%2$d" min="5" max="1440" class="small-text" /> %3$s',
             esc_attr( $option ),
-            $value,
+            absint( $value ),
             esc_html__( 'minutes (minimum 5)', 'woo-trendyol' )
         );
     }
@@ -955,7 +958,7 @@ class Woo_Trendyol_Admin {
         foreach ( $rates as $rate ) {
             printf(
                 '<option value="%1$d" %2$s>%1$d%%</option>',
-                $rate,
+                absint( $rate ),
                 selected( $current, $rate, false )
             );
         }
@@ -1140,7 +1143,10 @@ class Woo_Trendyol_Admin {
                     <optgroup label="<?php esc_attr_e( 'Product Custom Meta / Post Meta', 'woo-trendyol' ); ?>">
                         <?php if ( $current_wc && 0 === strpos( $current_wc, 'meta:' ) ) : ?>
                             <option value="<?php echo esc_attr( $current_wc ); ?>" selected="selected">
-                                <?php echo esc_html( sprintf( __( 'Custom Meta: %s', 'woo-trendyol' ), substr( $current_wc, 5 ) ) ); ?>
+                                <?php
+                                /* translators: %s: Custom meta key name */
+                                echo esc_html( sprintf( __( 'Custom Meta: %s', 'woo-trendyol' ), substr( $current_wc, 5 ) ) );
+                                ?>
                             </option>
                         <?php endif; ?>
                         <option value="custom_meta_prompt"><?php esc_html_e( '+ Enter Custom Meta Key...', 'woo-trendyol' ); ?></option>
@@ -1653,6 +1659,7 @@ class Woo_Trendyol_Admin {
             } else {
                 $calculated_prices = $this->category_helper->get_final_trendyol_prices( $product_obj );
                 if ( $calculated_prices['salePrice'] < $calculated_prices['listPrice'] ) {
+                    /* translators: 1: Regular/List price, 2: Sale price */
                     $calculated_price_display = sprintf(
                         __( '%1$s &euro; (List) / %2$s &euro; (Sale)', 'woo-trendyol' ),
                         number_format( $calculated_prices['listPrice'], 2 ),
@@ -1827,13 +1834,15 @@ class Woo_Trendyol_Admin {
 
                 $barcode = $this->product_creator->resolve_barcode( $variation );
                 if ( empty( $barcode ) ) {
+                    /* translators: %d: Variation ID */
                     $errors[] = sprintf( __( 'Variation #%d has no barcode.', 'woo-trendyol' ), $child_id );
                     continue;
                 }
 
                 $trendyol_product = $this->api->get_product_base( $barcode );
                 if ( is_wp_error( $trendyol_product ) ) {
-                    $errors[] = sprintf( __( 'Variation #%d (%s): %s', 'woo-trendyol' ), $child_id, $barcode, $trendyol_product->get_error_message() );
+                    /* translators: 1: Variation ID, 2: Barcode, 3: Error message */
+                    $errors[] = sprintf( __( 'Variation #%1$d (%2$s): %3$s', 'woo-trendyol' ), $child_id, $barcode, $trendyol_product->get_error_message() );
                     update_post_meta( $child_id, '_trendyol_sync_status', 'error' );
                     update_post_meta( $child_id, '_trendyol_sync_error',  $trendyol_product->get_error_message() );
                     continue;
@@ -2071,6 +2080,7 @@ class Woo_Trendyol_Admin {
         wp_send_json_success( [
             'product_ids'   => array_map( 'intval', $product_ids ),
             'omitted_count' => 0,
+            /* translators: %d: Number of products */
             'message'       => sprintf( __( 'Found %d eligible products to process.', 'woo-trendyol' ), count( $product_ids ) ),
         ] );
     }
@@ -2260,6 +2270,7 @@ class Woo_Trendyol_Admin {
         wp_send_json_success( [
             'product_ids'   => $final_ids,
             'omitted_count' => $omitted_count,
+            /* translators: 1: Number of unapproved products, 2: Number of omitted products */
             'message'       => sprintf(
                 __( 'Found %1$d unapproved products to update (%2$d omitted due to invalid mapping).', 'woo-trendyol' ),
                 count( $final_ids ),
@@ -3034,6 +3045,7 @@ class Woo_Trendyol_Admin {
 
         if ( is_wp_error( $response ) ) {
             wp_send_json_error( [ 
+                /* translators: %s: Error message */
                 'message' => sprintf( 
                     __( 'Failed to fetch Trendyol categories: %s', 'woo-trendyol' ), 
                     $response->get_error_message() 
@@ -3162,6 +3174,7 @@ class Woo_Trendyol_Admin {
         }
 
         wp_send_json_success( [
+            /* translators: 1: Number of mapped categories, 2: Total number of leaf categories */
             'message' => sprintf(
                 __( 'Category sync complete. %1$d WooCommerce categories mapped out of %2$d.', 'woo-trendyol' ),
                 $matched_count,
@@ -3237,6 +3250,7 @@ class Woo_Trendyol_Admin {
         }
 
         wp_send_json_success( [
+            /* translators: %d: Number of categories */
             'message' => sprintf(
                 __( 'Category attributes sync complete. Attributes updated for %d categories.', 'woo-trendyol' ),
                 $synced_count
@@ -3277,6 +3291,7 @@ class Woo_Trendyol_Admin {
         }
 
         wp_send_json_success( [
+            /* translators: %d: Number of mapped categories */
             'message' => sprintf(
                 __( 'Attribute values synced and cached for %d mapped categories. You can now map values in category edit pages.', 'woo-trendyol' ),
                 $synced_count
@@ -3412,7 +3427,10 @@ class Woo_Trendyol_Admin {
                                         &#x25C6; <?php esc_html_e( 'Predefined List', 'woo-trendyol' ); ?>
                                     </span>
                                     <span style="display: block; font-size: 11px; color: #666; font-weight: normal; margin-top: 3px; line-height: 1.3;">
-                                        <?php printf( esc_html__( 'Fixed Trendyol list (%d options)', 'woo-trendyol' ), $values_count ); ?>
+                                        <?php
+                                        /* translators: %d: Number of options */
+                                        printf( esc_html__( 'Fixed Trendyol list (%d options)', 'woo-trendyol' ), absint( $values_count ) );
+                                        ?>
                                     </span>
                                 <?php endif; ?>
                             </th>
@@ -3458,7 +3476,9 @@ class Woo_Trendyol_Admin {
 
                                     <?php if ( $is_globally_mapped ) : ?>
                                         <div class="wt-global-mapping-notice" style="font-size: 11px; color: #46b450; padding: 4px 8px; background: #ecf7ed; border-left: 4px solid #46b450; display: block; width: 100%; max-width: 400px; box-sizing: border-box;">
-                                            <?php printf( 
+                                            <?php
+                                            /* translators: %s: Attribute name */
+                                            printf( 
                                                 esc_html__( 'Mapped globally to "%s". Select an attribute here only to override global mapping.', 'woo-trendyol' ),
                                                 esc_html( $global_wc_attr )
                                             ); ?>
@@ -3775,7 +3795,8 @@ class Woo_Trendyol_Admin {
 
         $response = $this->api->get_common_label( $tracking_number );
         if ( is_wp_error( $response ) ) {
-            wp_die( sprintf( esc_html__( 'Failed to fetch label: %s', 'woo-trendyol' ), $response->get_error_message() ) );
+            /* translators: %s: Error message */
+            wp_die( sprintf( esc_html__( 'Failed to fetch label: %s', 'woo-trendyol' ), esc_html( $response->get_error_message() ) ) );
         }
 
         $label_data = null;
@@ -3799,7 +3820,7 @@ class Woo_Trendyol_Admin {
         if ( 'ZPL' === $format ) {
             header( 'Content-Type: text/plain' );
             header( 'Content-Disposition: attachment; filename="shipping-label-' . $tracking_number . '.zpl"' );
-            echo $label;
+            echo $label; // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- Raw ZPL file download.
         } else {
             // Support URL, raw %PDF stream, and base64-encoded PDF
             if ( filter_var( $label, FILTER_VALIDATE_URL ) || str_starts_with( $label, 'http://' ) || str_starts_with( $label, 'https://' ) ) {
@@ -3817,7 +3838,7 @@ class Woo_Trendyol_Admin {
 
             header( 'Content-Type: application/pdf' );
             header( 'Content-Disposition: inline; filename="shipping-label-' . $tracking_number . '.pdf"' );
-            echo $pdf_content;
+            echo $pdf_content; // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- Raw PDF binary stream.
         }
         exit;
     }

@@ -441,6 +441,7 @@ class Woo_Trendyol_Order_Sync {
                     $response->get_error_message()
                 )
             );
+            /* translators: %s: Error message */
             $order->add_order_note( sprintf( __( 'Could not notify Trendyol of cancellation: %s', 'woo-trendyol' ), $response->get_error_message() ) );
             $order->save();
             return;
@@ -910,6 +911,7 @@ class Woo_Trendyol_Order_Sync {
             if ( in_array( $ty_status, [ 'Shipped', 'Delivered' ], true ) ) {
                 $notified_status = $order->get_meta( '_trendyol_carrier_notified_status', true );
                 if ( $notified_status !== $ty_status ) {
+                    /* translators: %s: Trendyol carrier status */
                     $order->add_order_note( sprintf( __( 'Trendyol carrier status updated to %s.', 'woo-trendyol' ), $ty_status ) );
                     $order->update_meta_data( '_trendyol_carrier_notified_status', $ty_status );
                     $order->save();
@@ -917,6 +919,7 @@ class Woo_Trendyol_Order_Sync {
                 }
             } elseif ( in_array( $ty_status, [ 'Cancelled', 'UnSupplied' ], true ) && 'cancelled' !== $current_wc_status ) {
                 $order->update_meta_data( '_trendyol_notified_cancelled', 'yes' );
+                /* translators: %s: Trendyol package status */
                 $order->update_status( 'cancelled', sprintf( __( 'Trendyol package status updated to %s.', 'woo-trendyol' ), $ty_status ) );
                 $this->logger->info( sprintf( 'Order %d (package %s) transitioned to cancelled based on Trendyol status: %s', $order->get_id(), $package_id, $ty_status ) );
             }

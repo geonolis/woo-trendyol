@@ -176,7 +176,7 @@ class Woo_Trendyol_Import_Export {
         header( 'Pragma: no-cache' );
         header( 'Expires: 0' );
         
-        echo $json_data;
+        echo $json_data; // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- Raw JSON file download.
         exit;
     }
 

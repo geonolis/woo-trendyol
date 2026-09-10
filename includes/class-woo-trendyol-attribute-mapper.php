@@ -244,8 +244,9 @@ class Woo_Trendyol_Attribute_Mapper {
                     continue;
                 }
 
+                /* translators: 1: Attribute name, 2: Attribute ID */
                 $error_message = sprintf(
-                    __( 'Missing required attribute: "%s" (ID %d). Please map this attribute in the category settings or globally.', 'woo-trendyol' ),
+                    __( 'Missing required attribute: "%1$s" (ID %2$d). Please map this attribute in the category settings or globally.', 'woo-trendyol' ),
                     $attr_name,
                     $attr_id
                 );

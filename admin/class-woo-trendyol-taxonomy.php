@@ -125,6 +125,7 @@ class Woo_Trendyol_Taxonomy {
                 'ajaxUrl' => admin_url( 'admin-ajax.php' ),
                 'nonce'   => wp_create_nonce( 'woo_trendyol_taxonomy_save' ),
                 'labels'  => [
+                    /* translators: %d: Category depth level */
                     'selectLevel'      => __( '-- Select Category Level %d --', 'woo-trendyol' ),
                     'incomplete'       => __( 'Incomplete selection', 'woo-trendyol' ),
                     'idLabel'          => __( 'ID: ', 'woo-trendyol' ),

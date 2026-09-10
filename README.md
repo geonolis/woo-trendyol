@@ -1,3 +1,13 @@
+=== WooCommerce Trendyol Integration ===
+Contributors: manus
+Tags: woocommerce, trendyol, marketplace, sync, integration
+Requires at least: 6.0
+Tested up to: 6.7
+Requires PHP: 8.0
+Stable tag: 1.0.0
+License: GPLv2 or later
+License URI: https://www.gnu.org/licenses/gpl-2.0.html
+
 # WooCommerce Trendyol Integration
 
 A comprehensive, robust WooCommerce integration plugin for the Trendyol Marketplace API.

@@ -101,7 +101,9 @@ if ( 'success' === $sync_status ) {
                     <?php esc_html_e( 'Category Does Not Support Variations / Slicers on Trendyol', 'woo-trendyol' ); ?>
                 </div>
                 <p style="margin: 0 0 6px; font-size: 12px; line-height: 1.4; color: #555;">
-                    <?php printf(
+                    <?php
+                    /* translators: %1$s: Category ID */
+                    printf(
                         esc_html__( 'Trendyol Category %1$s has no variation slicers (Color/Size/Pattern/Σχέδιο). On Trendyol, items in this category cannot be displayed under one product card with variation dropdown buttons.', 'woo-trendyol' ),
                         '<strong>#' . esc_html( $category_id ) . '</strong>'
                     ); ?>
@@ -128,7 +130,10 @@ if ( 'success' === $sync_status ) {
                 </label>
                 <select id="_trendyol_force_split_variations" name="_trendyol_force_split_variations" style="width: 100%; max-width: 400px;">
                     <option value="" <?php selected( $force_split, '' ); ?>>
-                        <?php printf( esc_html__( 'Follow Global Default (%s)', 'woo-trendyol' ), ( 'no' === $global_split_setting ? esc_html__( 'Do Not Split', 'woo-trendyol' ) : esc_html__( 'Split if Category Lacks Slicers', 'woo-trendyol' ) ) ); ?>
+                        <?php
+                        /* translators: %s: Global split default label */
+                        printf( esc_html__( 'Follow Global Default (%s)', 'woo-trendyol' ), ( 'no' === $global_split_setting ? esc_html__( 'Do Not Split', 'woo-trendyol' ) : esc_html__( 'Split if Category Lacks Slicers', 'woo-trendyol' ) ) );
+                        ?>
                     </option>
                     <option value="yes" <?php selected( $force_split, 'yes' ); ?>>
                         <?php esc_html_e( 'Force Split into Individual Standalone Products', 'woo-trendyol' ); ?>
@@ -235,6 +240,7 @@ if ( 'success' === $sync_status ) {
                         $children = $product_obj->get_children();
                         if ( ! empty( $children ) ) {
                             $has_sku   = true;
+                            /* translators: %d: Number of child variations */
                             $sku_label = sprintf( _n( '%d variation', '%d variations', count( $children ), 'woo-trendyol' ), count( $children ) );
                         }
                     }

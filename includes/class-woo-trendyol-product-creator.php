@@ -597,6 +597,7 @@ class Woo_Trendyol_Product_Creator {
 
             if ( null !== $min_price && $sale_price < $min_price ) {
                 $result['skipped']++;
+                /* translators: 1: Product sale price, 2: Minimum price limit */
                 $result['errors'][ $pid ] = sprintf(
                     __( 'Price %1$s is below the minimum bulk push limit of %2$s.', 'woo-trendyol' ),
                     number_format( $sale_price, 2 ),
@@ -1238,8 +1239,9 @@ class Woo_Trendyol_Product_Creator {
                     if ( 'yes' === $this->category_helper->get_inherited_term_meta( $term->term_id, 'trendyol_exclude_bulk_push' ) ) {
                         return new WP_Error(
                             'excluded_category',
+                            /* translators: 1: Product ID, 2: Category name */
                             sprintf(
-                                __( 'Product #%d is in category "%s" which is excluded from bulk push.', 'woo-trendyol' ),
+                                __( 'Product #%1$d is in category "%2$s" which is excluded from bulk push.', 'woo-trendyol' ),
                                 $product_id,
                                 $term->name
                             )
@@ -1283,6 +1285,7 @@ class Woo_Trendyol_Product_Creator {
             if ( '' !== $min_price_opt && is_numeric( $min_price_opt ) && $sale_price < (float) $min_price_opt ) {
                 return new WP_Error(
                     'min_price_limit',
+                    /* translators: 1: Product sale price, 2: Minimum price limit */
                     sprintf(
                         __( 'Price %1$s is below the minimum bulk push limit of %2$s.', 'woo-trendyol' ),
                         number_format( $sale_price, 2 ),
@@ -1457,7 +1460,7 @@ class Woo_Trendyol_Product_Creator {
         foreach ( $image_ids as $id ) {
             $url = wp_get_attachment_url( $id );
             if ( $url && ( str_starts_with( $url, 'https://' ) || str_starts_with( $url, 'http://' ) ) ) {
-                $parsed = parse_url( $url );
+                $parsed = wp_parse_url( $url );
                 if ( $parsed && ! empty( $parsed['host'] ) && ! empty( $parsed['path'] ) ) {
                     $path_parts    = explode( '/', $parsed['path'] );
                     $encoded_parts = array_map( function( $part ) {

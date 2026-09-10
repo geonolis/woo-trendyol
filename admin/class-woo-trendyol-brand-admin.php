@@ -172,9 +172,11 @@ class Woo_Trendyol_Brand_Admin {
         $brand_name = (string) get_term_meta( $term_id, Woo_Trendyol_Brand_Sync::META_NAME_KEY, true );
 
         if ( $brand_id ) {
+            /* translators: 1: Brand name, 2: Brand ID */
+            $title = sprintf( __( 'Mapped to Trendyol brand: %1$s (ID %2$d)', 'woo-trendyol' ), $brand_name, $brand_id );
             return sprintf(
                 '<span class="wt-brand-dot wt-brand-dot--matched" title="%s">&#9679;</span> <small>%s</small>',
-                esc_attr( sprintf( __( 'Mapped to Trendyol brand: %s (ID %d)', 'woo-trendyol' ), $brand_name, $brand_id ) ),
+                esc_attr( $title ),
                 esc_html( $brand_id )
             );
         }
@@ -248,8 +250,6 @@ class Woo_Trendyol_Brand_Admin {
         if ( is_wp_error( $total_brands ) ) {
             $total_brands = 0;
         }
-
-        ob_start();
         ?>
         <div class="wt-card" id="wt-brand-sync-card">
             <h3><?php esc_html_e( 'Sync Brands to Trendyol', 'woo-trendyol' ); ?></h3>
@@ -299,7 +299,6 @@ class Woo_Trendyol_Brand_Admin {
             <?php endif; ?>
         </div>
         <?php
-        echo ob_get_clean();
     }
 
     /**

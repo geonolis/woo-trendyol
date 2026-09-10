@@ -140,7 +140,10 @@ $display_path = ! empty( $trendyol_path )
                                         &#x25C6; <?php esc_html_e( 'Predefined List', 'woo-trendyol' ); ?>
                                     </span>
                                     <span style="display: block; font-size: 11px; color: #666; font-weight: normal; margin-top: 3px; line-height: 1.3;">
-                                        <?php printf( esc_html__( 'Fixed Trendyol list (%d options)', 'woo-trendyol' ), $values_count ); ?>
+                                        <?php
+                                        /* translators: %d: Number of options */
+                                        printf( esc_html__( 'Fixed Trendyol list (%d options)', 'woo-trendyol' ), absint( $values_count ) );
+                                        ?>
                                     </span>
                                 <?php endif; ?>
                             </th>
@@ -186,7 +189,9 @@ $display_path = ! empty( $trendyol_path )
 
                                     <?php if ( $is_globally_mapped ) : ?>
                                         <div class="wt-global-mapping-notice" style="font-size: 11px; color: #46b450; padding: 4px 8px; background: #ecf7ed; border-left: 4px solid #46b450; display: block; width: 100%; max-width: 400px; box-sizing: border-box;">
-                                            <?php printf( 
+                                            <?php
+                                            /* translators: %s: Attribute name */
+                                            printf( 
                                                 esc_html__( 'Mapped globally to "%s". Select an attribute here only to override global mapping.', 'woo-trendyol' ),
                                                 esc_html( $global_wc_attr )
                                             ); ?>
