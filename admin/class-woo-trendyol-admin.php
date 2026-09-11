@@ -194,6 +194,11 @@ class Woo_Trendyol_Admin {
                 'sendSuccess'        => __( 'Sent successfully.', 'woo-trendyol' ),
                 'sendError'          => __( 'Send failed: ', 'woo-trendyol' ),
                 'sendPending'        => __( 'Submitted — status pending.', 'woo-trendyol' ),
+                'yesText'            => __( 'Yes', 'woo-trendyol' ),
+                'noText'             => __( 'No', 'woo-trendyol' ),
+                'pendingText'        => __( 'Pending', 'woo-trendyol' ),
+                'successText'        => __( 'Success', 'woo-trendyol' ),
+                'resendText'         => __( 'Re-send to Trendyol', 'woo-trendyol' ),
             ]
         );
     }
@@ -1680,6 +1685,20 @@ class Woo_Trendyol_Admin {
             )
             : __( 'Never', 'woo-trendyol' );
 
+        $variation_slicer_error = null;
+        if ( ! empty( $is_variable ) && ! empty( $category_id ) ) {
+            $is_split = $this->category_helper->should_split_variations( $post_id, (int) $category_id );
+            if ( ! $is_split ) {
+                $term      = $this->category_helper->get_resolved_category_term( $post_id );
+                $term_id   = $term ? (int) $term->term_id : 0;
+                $mapper    = $this->product_creator->get_attribute_mapper();
+                $var_check = $mapper->validate_variation_attributes( $product_obj, (int) $category_id, $term_id );
+                if ( is_wp_error( $var_check ) ) {
+                    $variation_slicer_error = $var_check->get_error_message();
+                }
+            }
+        }
+
         include WOO_TRENDYOL_PATH . 'admin/partials/woo-trendyol-admin-product-meta.php';
     }
 
@@ -3094,6 +3113,23 @@ class Woo_Trendyol_Admin {
             ] );
         }
 
+        if ( $product->is_type( 'variable' ) ) {
+            $is_split = $this->category_helper->should_split_variations( $post_id, (int) $category_id );
+            if ( ! $is_split ) {
+                $term      = $this->category_helper->get_resolved_category_term( $post_id );
+                $term_id   = $term ? (int) $term->term_id : 0;
+                $mapper    = $this->product_creator->get_attribute_mapper();
+                $var_check = $mapper->validate_variation_attributes( $product, (int) $category_id, $term_id );
+                if ( is_wp_error( $var_check ) ) {
+                    $error_msg = $var_check->get_error_message();
+                    update_post_meta( $post_id, '_trendyol_sync_status', 'error' );
+                    update_post_meta( $post_id, '_trendyol_sync_error',  $error_msg );
+                    update_post_meta( $post_id, '_trendyol_last_sync',   time() );
+                    wp_send_json_error( [ 'message' => $error_msg ] );
+                }
+            }
+        }
+
         // --- Submit to Trendyol ---
         $push_result = $this->product_creator->push_products( [ $post_id ] );
 
@@ -3212,6 +3248,10 @@ class Woo_Trendyol_Admin {
                     update_post_meta( $cid, '_trendyol_blacklisted', 'no' );
                     update_post_meta( $cid, '_trendyol_sync_status', 'error' );
                     update_post_meta( $cid, '_trendyol_sync_error',  $fail_reason );
+                    update_post_meta( $cid, '_trendyol_last_sync',   time() );
+                } else {
+                    update_post_meta( $cid, '_trendyol_sent',        'yes' );
+                    update_post_meta( $cid, '_trendyol_sync_status', 'pending' );
                     update_post_meta( $cid, '_trendyol_last_sync',   time() );
                 }
 

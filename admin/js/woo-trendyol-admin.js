@@ -1190,10 +1190,49 @@
                         .html( '<strong>' + escHtml( response.data.message ) + '</strong>' )
                         .show();
 
+                    // Update "Sent to Trendyol" in UI from No to Yes
+                    var yesText     = ( typeof wooTrendyolAdmin !== 'undefined' && wooTrendyolAdmin.yesText ) ? wooTrendyolAdmin.yesText : 'Yes';
+                    var pendingText = ( typeof wooTrendyolAdmin !== 'undefined' && wooTrendyolAdmin.pendingText ) ? wooTrendyolAdmin.pendingText : 'Pending';
+                    var successText = ( typeof wooTrendyolAdmin !== 'undefined' && wooTrendyolAdmin.successText ) ? wooTrendyolAdmin.successText : 'Success';
+                    var resendText  = ( typeof wooTrendyolAdmin !== 'undefined' && wooTrendyolAdmin.resendText ) ? wooTrendyolAdmin.resendText : 'Re-send to Trendyol';
+
+                    var $sentTd = $( '#wt-meta-sent-status' );
+                    if ( ! $sentTd.length ) {
+                        $( '.wt-meta-table tr' ).each( function () {
+                            var thText = $( this ).find( 'th' ).text().toLowerCase();
+                            if ( thText.indexOf( 'sent' ) !== -1 || thText.indexOf( 'αποστολή' ) !== -1 ) {
+                                $sentTd = $( this ).find( 'td' );
+                            }
+                        } );
+                    }
+                    if ( $sentTd.length ) {
+                        $sentTd.html( '<span class="wt-badge wt-badge--success">' + escHtml( yesText ) + '</span>' );
+                    }
+
+                    // Update "Sync Result"
+                    var $syncTd = $( '#wt-meta-sync-status' );
+                    if ( ! $syncTd.length ) {
+                        $( '.wt-meta-table tr' ).each( function () {
+                            var thText = $( this ).find( 'th' ).text().toLowerCase();
+                            if ( thText.indexOf( 'sync result' ) !== -1 || thText.indexOf( 'αποτέλεσμα' ) !== -1 ) {
+                                $syncTd = $( this ).find( 'td' );
+                            }
+                        } );
+                    }
+                    if ( $syncTd.length ) {
+                        if ( 'success' === type ) {
+                            $syncTd.html( '<span class="wt-badge wt-badge--success">' + escHtml( successText ) + '</span>' );
+                        } else if ( 'pending' === type ) {
+                            $syncTd.html( '<span class="wt-badge wt-badge--warning">' + escHtml( pendingText ) + '</span>' );
+                        }
+                    }
+
+                    // Update button styling and text to Re-send
+                    $self.removeClass( 'button-primary' ).addClass( 'button-secondary' );
+                    $self.prop( 'disabled', false ).text( resendText );
+
                     if ( response.data.reload ) {
                         setTimeout( function () { window.location.reload(); }, 2000 );
-                    } else {
-                        $self.prop( 'disabled', false ).text( wooTrendyolAdmin.sendText );
                     }
                 } else {
                     $result

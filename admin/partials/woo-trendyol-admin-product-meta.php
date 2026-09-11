@@ -94,6 +94,18 @@ if ( 'success' === $sync_status ) {
             <?php endif; ?>
         </table>
 
+        <?php if ( ! empty( $variation_slicer_error ) ) : ?>
+            <div class="wt-slicer-warning-box" style="margin: 12px 0; padding: 12px 14px; background: #fdf2f2; border-left: 4px solid #d63638; border-radius: 2px;">
+                <div style="font-weight: 600; color: #a00; margin-bottom: 4px; display: flex; align-items: center; gap: 6px;">
+                    <span class="dashicons dashicons-warning" style="color: #d63638; font-size: 18px; line-height: 1;"></span>
+                    <?php esc_html_e( 'Variation Attribute Mapping Required', 'woo-trendyol' ); ?>
+                </div>
+                <p style="margin: 0; font-size: 12px; line-height: 1.4; color: #555;">
+                    <?php echo esc_html( $variation_slicer_error ); ?>
+                </p>
+            </div>
+        <?php endif; ?>
+
         <?php if ( ! empty( $is_variable ) && ! empty( $category_id ) && empty( $category_supports_slicers ) ) : ?>
             <div class="wt-slicer-warning-box" style="margin: 12px 0; padding: 12px 14px; background: #fff8e5; border-left: 4px solid #ffb900; border-radius: 2px;">
                 <div style="font-weight: 600; color: #855a00; margin-bottom: 4px; display: flex; align-items: center; gap: 6px;">
@@ -291,7 +303,7 @@ if ( 'success' === $sync_status ) {
         <table class="wt-meta-table">
             <tr>
                 <th><?php esc_html_e( 'Sent to Trendyol', 'woo-trendyol' ); ?></th>
-                <td><?php echo $badge( $sent ?: 'no', __( 'Yes', 'woo-trendyol' ), __( 'No', 'woo-trendyol' ) ); // phpcs:ignore WordPress.Security.EscapeOutput ?></td>
+                <td id="wt-meta-sent-status"><?php echo $badge( $sent ?: 'no', __( 'Yes', 'woo-trendyol' ), __( 'No', 'woo-trendyol' ) ); // phpcs:ignore WordPress.Security.EscapeOutput ?></td>
             </tr>
             <tr>
                 <th><?php esc_html_e( 'Approval Status', 'woo-trendyol' ); ?></th>
@@ -332,7 +344,7 @@ if ( 'success' === $sync_status ) {
             <?php endif; ?>
             <tr>
                 <th><?php esc_html_e( 'Sync Result', 'woo-trendyol' ); ?></th>
-                <td><?php echo $sync_badge; // phpcs:ignore WordPress.Security.EscapeOutput ?></td>
+                <td id="wt-meta-sync-status"><?php echo $sync_badge; // phpcs:ignore WordPress.Security.EscapeOutput ?></td>
             </tr>
             <?php if ( ! empty( $sync_error ) ) : ?>
             <tr>

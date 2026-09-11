@@ -314,6 +314,201 @@ class Woo_Trendyol_Attribute_Mapper {
         return null;
     }
 
+    /**
+     * Fetch all slicer / variation attributes for a given category.
+     *
+     * In Trendyol's category schema, attributes with 'slicer' => true (or 'varianter' => true)
+     * are the variant-differentiating dimensions (e.g. Size, Color, Pattern).
+     *
+     * @since 1.2.0
+     * @param int $category_id Trendyol leaf-level category ID.
+     * @return array Array of category attribute definitions that act as slicers.
+     */
+    public function get_category_slicer_attributes( int $category_id ): array {
+        if ( ! $category_id ) {
+            return [];
+        }
+
+        $schema = $this->api->get_category_attributes( $category_id );
+        if ( is_wp_error( $schema ) || empty( $schema['categoryAttributes'] ) ) {
+            return [];
+        }
+
+        $slicers = [];
+        foreach ( $schema['categoryAttributes'] as $cat_attr ) {
+            if ( ! empty( $cat_attr['slicer'] ) || ! empty( $cat_attr['varianter'] ) ) {
+                $slicers[] = $cat_attr;
+            }
+        }
+
+        return $slicers;
+    }
+
+    /**
+     * Validate that all WooCommerce variation attributes on a variable product
+     * are mapped to a Trendyol slicer attribute for the given category.
+     *
+     * @since 1.2.0
+     * @param WC_Product $product     The WooCommerce product (variable).
+     * @param int        $category_id Trendyol leaf category ID.
+     * @param int        $term_id     WooCommerce product_cat term ID.
+     * @return true|WP_Error True if all variation attributes are mapped, or WP_Error listing unmapped attributes.
+     */
+    public function validate_variation_attributes( WC_Product $product, int $category_id, int $term_id ): true|WP_Error {
+        if ( ! $product->is_type( 'variable' ) ) {
+            return true;
+        }
+
+        // Collect all attributes that are actually configured to be used for variations
+        $variation_attrs = [];
+        foreach ( $product->get_attributes() as $k => $attr_obj ) {
+            if ( is_object( $attr_obj ) && method_exists( $attr_obj, 'get_variation' ) && $attr_obj->get_variation() ) {
+                $slug  = sanitize_title( (string) $k );
+                $name  = (string) $attr_obj->get_name();
+                $label = wc_attribute_label( $name, $product );
+                $variation_attrs[] = [
+                    'key'   => (string) $k,
+                    'slug'  => $slug,
+                    'name'  => $name,
+                    'label' => ! empty( $label ) ? $label : ( ! empty( $name ) ? $name : (string) $k ),
+                ];
+            }
+        }
+
+        if ( empty( $variation_attrs ) ) {
+            return true;
+        }
+
+        // Fetch category slicers
+        $slicers = $this->get_category_slicer_attributes( $category_id );
+        if ( empty( $slicers ) ) {
+            return new WP_Error(
+                'category_no_slicers',
+                sprintf(
+                    /* translators: %d: category ID */
+                    __( 'Trendyol Category #%d does not support variation slicers. Variations cannot be grouped under one product. Please enable "Split Variations Without Slicers" in settings or set "Force Split" on this product.', 'woo-trendyol' ),
+                    $category_id
+                )
+            );
+        }
+
+        // Load mappings
+        $category_map = $this->load_category_attribute_map( $term_id );
+
+        $slicer_ids   = [];
+        $slicer_names = [];
+        foreach ( $slicers as $s ) {
+            $s_id = (int) ( $s['attribute']['id'] ?? 0 );
+            if ( $s_id ) {
+                $slicer_ids[]          = $s_id;
+                $slicer_names[ $s_id ] = (string) ( $s['attribute']['name'] ?? '' );
+            }
+        }
+
+        // Helper to check if a mapped WooCommerce value matches a variation attribute
+        $matches_wc_attr = function( string $mapped_val, array $v ): bool {
+            if ( empty( $mapped_val ) ) {
+                return false;
+            }
+            $mapped_norm  = $this->normalise_slug( $mapped_val );
+            $mapped_raw   = mb_strtolower( trim( $mapped_val ) );
+            $mapped_clean = str_starts_with( $mapped_raw, 'pa_' ) ? substr( $mapped_raw, 3 ) : $mapped_raw;
+
+            foreach ( [ $v['key'], $v['slug'], $v['name'], $v['label'] ] as $candidate ) {
+                if ( empty( $candidate ) ) {
+                    continue;
+                }
+                $c_raw   = mb_strtolower( trim( $candidate ) );
+                $c_clean = str_starts_with( $c_raw, 'pa_' ) ? substr( $c_raw, 3 ) : $c_raw;
+                if ( $mapped_raw === $c_raw || $mapped_clean === $c_clean || $mapped_norm === $this->normalise_slug( $candidate ) ) {
+                    return true;
+                }
+            }
+            return false;
+        };
+
+        $unmapped = [];
+
+        foreach ( $variation_attrs as $v ) {
+            $is_mapped = false;
+
+            // 1. Check category attribute map for any slicer attribute
+            foreach ( $slicer_ids as $s_id ) {
+                $mapped_wc = isset( $category_map[ (string) $s_id ] ) ? (string) $category_map[ (string) $s_id ] : '';
+                if ( $matches_wc_attr( $mapped_wc, $v ) ) {
+                    $is_mapped = true;
+                    break;
+                }
+            }
+
+            // 2. Check dynamic global attribute option for any slicer
+            if ( ! $is_mapped ) {
+                foreach ( $slicer_ids as $s_id ) {
+                    $dyn_wc = (string) get_option( 'trendyol_global_attr_' . $s_id . '_wc', '' );
+                    if ( $matches_wc_attr( $dyn_wc, $v ) ) {
+                        $is_mapped = true;
+                        break;
+                    }
+                }
+            }
+
+            // 3. Check standard global slots (e.g. color, age, gender) if slicer matches slot
+            if ( ! $is_mapped ) {
+                foreach ( $slicer_ids as $s_id ) {
+                    $s_name = $slicer_names[ $s_id ] ?? '';
+                    $slot   = $this->get_global_slot( $s_name );
+                    if ( $slot ) {
+                        $slot_wc = (string) get_option( 'trendyol_global_attr_' . $slot . '_wc', '' );
+                        if ( $matches_wc_attr( $slot_wc, $v ) ) {
+                            $is_mapped = true;
+                            break;
+                        }
+                        if ( 'color' === $slot ) {
+                            $custom_wc = (string) get_option( 'trendyol_global_attr_color_custom_wc', '' );
+                            if ( $matches_wc_attr( $custom_wc, $v ) ) {
+                                $is_mapped = true;
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+
+            // 4. Check exact name match between slicer name and WC attribute slug/label
+            if ( ! $is_mapped ) {
+                foreach ( $slicer_ids as $s_id ) {
+                    $s_name = $slicer_names[ $s_id ] ?? '';
+                    if ( $matches_wc_attr( $s_name, $v ) ) {
+                        $is_mapped = true;
+                        break;
+                    }
+                }
+            }
+
+            if ( ! $is_mapped ) {
+                $unmapped[] = sprintf( '"%s"', $v['label'] );
+            }
+        }
+
+        if ( ! empty( $unmapped ) ) {
+            $helper   = new Woo_Trendyol_Category_Helper();
+            $cat_path = $helper->get_trendyol_category_path( $product->get_id() );
+            $cat_name = ! empty( $cat_path ) ? $cat_path : ( '#' . $category_id );
+
+            return new WP_Error(
+                'unmapped_variation_attribute',
+                sprintf(
+                    /* translators: 1: Attribute name(s), 2: Category name */
+                    __( 'WooCommerce variation attribute %1$s is not mapped to a Trendyol slicer attribute for category "%2$s". Please map it in Category Mapping so variations can be differentiated on Trendyol.', 'woo-trendyol' ),
+                    implode( ', ', array_unique( $unmapped ) ),
+                    $cat_name
+                )
+            );
+        }
+
+        return true;
+    }
+
     // -----------------------------------------------------------------------
     // Private resolution helpers
     // -----------------------------------------------------------------------

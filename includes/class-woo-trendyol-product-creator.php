@@ -117,6 +117,26 @@ class Woo_Trendyol_Product_Creator {
         $this->attribute_mapper = $attribute_mapper;
     }
 
+    /**
+     * Get the attribute mapper instance.
+     *
+     * @since 1.2.0
+     * @return Woo_Trendyol_Attribute_Mapper
+     */
+    public function get_attribute_mapper(): Woo_Trendyol_Attribute_Mapper {
+        return $this->attribute_mapper;
+    }
+
+    /**
+     * Get the category helper instance.
+     *
+     * @since 1.2.0
+     * @return Woo_Trendyol_Category_Helper
+     */
+    public function get_category_helper(): Woo_Trendyol_Category_Helper {
+        return $this->category_helper;
+    }
+
     // -----------------------------------------------------------------------
     // Public API
     // -----------------------------------------------------------------------
@@ -177,6 +197,31 @@ class Woo_Trendyol_Product_Creator {
                     $result['errors'][ $pid ] = __( 'Variable product has no variations.', 'woo-trendyol' );
                     continue;
                 }
+
+                $category_id = (int) $this->category_helper->get_trendyol_category_id( $pid );
+                if ( ! $category_id ) {
+                    $result['skipped']++;
+                    $result['errors'][ $pid ] = __( 'Product has no Trendyol category mapping.', 'woo-trendyol' );
+                    continue;
+                }
+
+                $is_split = $this->category_helper->should_split_variations( $pid, $category_id );
+                if ( ! $is_split ) {
+                    $term      = $this->category_helper->get_resolved_category_term( $pid );
+                    $term_id   = $term ? (int) $term->term_id : 0;
+                    $var_check = $this->attribute_mapper->validate_variation_attributes( $product, $category_id, $term_id );
+                    if ( is_wp_error( $var_check ) ) {
+                        $err_msg = $var_check->get_error_message();
+                        $result['skipped']++;
+                        $result['errors'][ $pid ] = $err_msg;
+                        update_post_meta( $pid, '_trendyol_sync_status', 'error' );
+                        update_post_meta( $pid, '_trendyol_sync_error',  $err_msg );
+                        update_post_meta( $pid, '_trendyol_last_sync',   time() );
+                        $this->logger->warning( sprintf( 'Skipped variable product #%d: %s', $pid, $err_msg ) );
+                        continue;
+                    }
+                }
+
                 foreach ( $children as $child_id ) {
                     $child = wc_get_product( $child_id );
                     if ( ! $child || ( 'publish' !== $child->get_status() && 'publish' !== get_post_status( $child_id ) ) ) {
@@ -245,6 +290,17 @@ class Woo_Trendyol_Product_Creator {
             if ( ! $brand_id ) {
                 return false;
             }
+
+            $is_split = $this->category_helper->should_split_variations( $product->get_id(), $category_id );
+            if ( ! $is_split ) {
+                $term      = $this->category_helper->get_resolved_category_term( $product->get_id() );
+                $term_id   = $term ? (int) $term->term_id : 0;
+                $var_check = $this->attribute_mapper->validate_variation_attributes( $product, $category_id, $term_id );
+                if ( is_wp_error( $var_check ) ) {
+                    return false;
+                }
+            }
+
             $has_valid_child = false;
             foreach ( $children as $child_id ) {
                 $child = wc_get_product( $child_id );
@@ -708,6 +764,59 @@ class Woo_Trendyol_Product_Creator {
 
         if ( empty( $items ) ) {
             return $result;
+        }
+
+        // Pre-flight check: ensure variations under the same productMainId do not have duplicate attribute signatures.
+        $main_id_groups = [];
+        foreach ( $items as $idx => $item ) {
+            $main_id = $item['productMainId'] ?? '';
+            if ( ! empty( $main_id ) ) {
+                $main_id_groups[ $main_id ][] = $idx;
+            }
+        }
+
+        $duplicate_indices = [];
+        foreach ( $main_id_groups as $main_id => $indices ) {
+            if ( count( $indices ) > 1 ) {
+                $seen_signatures = [];
+                foreach ( $indices as $idx ) {
+                    $attr_list = $items[ $idx ]['attributes'] ?? [];
+                    usort( $attr_list, static function ( $a, $b ) {
+                        return ( (int) ( $a['attributeId'] ?? 0 ) ) <=> ( (int) ( $b['attributeId'] ?? 0 ) );
+                    } );
+                    $sig = wp_json_encode( $attr_list );
+                    if ( isset( $seen_signatures[ $sig ] ) ) {
+                        $duplicate_indices[] = $idx;
+                        $duplicate_indices[] = $seen_signatures[ $sig ];
+                    } else {
+                        $seen_signatures[ $sig ] = $idx;
+                    }
+                }
+            }
+        }
+
+        if ( ! empty( $duplicate_indices ) ) {
+            $duplicate_indices = array_unique( $duplicate_indices );
+            foreach ( $duplicate_indices as $idx ) {
+                $pid = $item_map[ $idx ] ?? null;
+                if ( $pid ) {
+                    $dup_msg = __( 'Cannot push variation: Multiple variations under the same product share identical Trendyol attributes. Variations must be distinguished by at least one mapped slicer attribute.', 'woo-trendyol' );
+                    $result['skipped']++;
+                    $result['errors'][ $pid ] = $dup_msg;
+                    update_post_meta( $pid, '_trendyol_sync_status', 'error' );
+                    update_post_meta( $pid, '_trendyol_sync_error',  $dup_msg );
+                    $parent_id = wp_get_post_parent_id( $pid );
+                    if ( $parent_id && $parent_id !== $pid ) {
+                        $result['errors'][ $parent_id ] = $dup_msg;
+                        update_post_meta( $parent_id, '_trendyol_sync_status', 'error' );
+                        update_post_meta( $parent_id, '_trendyol_sync_error',  $dup_msg );
+                    }
+                }
+            }
+            $items = array_diff_key( $items, array_flip( $duplicate_indices ) );
+            if ( empty( $items ) ) {
+                return $result;
+            }
         }
 
         // Submit in batches.
