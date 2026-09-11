@@ -281,6 +281,13 @@ class Woo_Trendyol_API_Client {
      * @param array $params Query parameters (e.g. page, size, barcode, etc.).
      * @return array|WP_Error Paginated response or WP_Error.
      */
+    public function get_approved_products( array $params = [] ): array|WP_Error {
+        return $this->get(
+            "/product/sellers/{$this->seller_id}/products/approved",
+            $params
+        );
+    }
+
     public function get_unapproved_products( array $params = [] ): array|WP_Error {
         return $this->get(
             "/product/sellers/{$this->seller_id}/products/unapproved",

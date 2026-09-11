@@ -289,6 +289,7 @@ class Woo_Trendyol {
 
         // AJAX handlers — product edit page.
         $this->loader->add_action( 'wp_ajax_trendyol_refresh_status',       $admin, 'ajax_refresh_product_status' );
+        $this->loader->add_action( 'wp_ajax_trendyol_audit_inventory_status', $admin, 'ajax_audit_inventory_status' );
         $this->loader->add_action( 'wp_ajax_trendyol_push_single_product',  $admin, 'ajax_push_single_product' );
         $this->loader->add_action( 'wp_ajax_trendyol_get_shipping_label',   $admin, 'ajax_get_shipping_label' );
 

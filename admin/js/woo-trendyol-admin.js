@@ -1143,7 +1143,11 @@
                     setTimeout( function () { window.location.reload(); }, 1200 );
                 } else {
                     showResult( $result, response.data.message, 'error' );
-                    $self.prop( 'disabled', false ).text( wooTrendyolAdmin.refreshText );
+                    if ( response.data && response.data.reload ) {
+                        setTimeout( function () { window.location.reload(); }, 1800 );
+                    } else {
+                        $self.prop( 'disabled', false ).text( wooTrendyolAdmin.refreshText );
+                    }
                 }
             } )
             .fail( function () {

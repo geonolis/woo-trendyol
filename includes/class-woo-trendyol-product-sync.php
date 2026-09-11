@@ -443,6 +443,15 @@ class Woo_Trendyol_Product_Sync {
      * @param WC_Product $product The product to sync images for.
      */
     public function sync_images( WC_Product $product ): void {
+        $post_id = $product->get_id();
+        $is_sent = 'yes' === get_post_meta( $post_id, '_trendyol_sent', true );
+        if ( ! $is_sent && $product->is_type( 'variation' ) ) {
+            $is_sent = 'yes' === get_post_meta( $product->get_parent_id(), '_trendyol_sent', true );
+        }
+        if ( ! $is_sent ) {
+            return;
+        }
+
         $barcode = $this->product_creator->resolve_barcode( $product );
         if ( empty( $barcode ) ) {
             return;
@@ -492,6 +501,15 @@ class Woo_Trendyol_Product_Sync {
     private function build_price_stock_item( WC_Product $product ): ?array {
         // Never send price/stock for variable parent products (only variations or simple products)
         if ( $product->is_type( 'variable' ) ) {
+            return null;
+        }
+
+        $post_id = $product->get_id();
+        $is_sent = 'yes' === get_post_meta( $post_id, '_trendyol_sent', true );
+        if ( ! $is_sent && $product->is_type( 'variation' ) ) {
+            $is_sent = 'yes' === get_post_meta( $product->get_parent_id(), '_trendyol_sent', true );
+        }
+        if ( ! $is_sent ) {
             return null;
         }
 
@@ -652,6 +670,5 @@ class Woo_Trendyol_Product_Sync {
         update_post_meta( $post_id, '_trendyol_last_sync',   current_time( 'timestamp' ) );
         update_post_meta( $post_id, '_trendyol_sync_error',  $error_msg );
         update_post_meta( $post_id, '_trendyol_batch_id',    $batch_id );
-        update_post_meta( $post_id, '_trendyol_sent',        'yes' );
     }
 }

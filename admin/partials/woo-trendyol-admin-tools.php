@@ -52,6 +52,23 @@ if ( ! defined( 'WPINC' ) ) {
     <div id="wt-import-result" style="margin-top: 15px; display:none;"></div>
 </div>
 
+<!-- Live Inventory Audit Card -->
+<div class="wt-card" style="margin-top: 20px;">
+    <h3><?php esc_html_e( 'Audit & Synchronize Live Trendyol Inventory Status', 'woo-trendyol' ); ?></h3>
+    <p class="description">
+        <?php esc_html_e( 'Queries your live Trendyol account (approved and unapproved products) and verifies all WooCommerce products marked as sent. Corrects products that were falsely reported as sent, updates live approval and on-sale statuses, and clears obsolete sync errors.', 'woo-trendyol' ); ?>
+    </p>
+    
+    <div style="margin-top:15px;">
+        <button type="button" id="wt-audit-inventory-btn" class="button button-secondary">
+            <span class="dashicons dashicons-update"></span> <?php esc_html_e( 'Run Inventory Status Audit', 'woo-trendyol' ); ?>
+        </button>
+        <span class="spinner" id="wt-audit-spinner" style="float:none;vertical-align:middle;margin-left:5px;"></span>
+    </div>
+    
+    <div id="wt-audit-result" style="margin-top: 15px; display:none;"></div>
+</div>
+
 <script>
 jQuery(document).ready(function($) {
     $('#wt-import-btn').on('click', function() {
@@ -92,6 +109,39 @@ jQuery(document).ready(function($) {
                 spinner.removeClass('is-active');
                 resultDiv.addClass('wt-notice-error').html('<p><strong><?php esc_html_e( 'Server Error', 'woo-trendyol' ); ?></strong></p>').show();
             }
+        });
+    });
+
+    $('#wt-audit-inventory-btn').on('click', function() {
+        var $btn = $(this);
+        var resultDiv = $('#wt-audit-result');
+        var spinner = $('#wt-audit-spinner');
+
+        if (!confirm('<?php esc_html_e( 'This will check all products against live Trendyol inventory and update their sync/sent status. Continue?', 'woo-trendyol' ); ?>')) {
+            return;
+        }
+
+        $btn.prop('disabled', true);
+        spinner.addClass('is-active');
+        resultDiv.hide().removeClass('wt-notice-success wt-notice-error').empty();
+
+        $.post(wooTrendyolAdmin.ajaxUrl, {
+            action: 'trendyol_audit_inventory_status',
+            nonce: wooTrendyolAdmin.nonce
+        })
+        .done(function(response) {
+            spinner.removeClass('is-active');
+            $btn.prop('disabled', false);
+            if (response.success) {
+                resultDiv.addClass('wt-notice-success').html('<p><strong>' + response.data.message + '</strong></p>').show();
+            } else {
+                resultDiv.addClass('wt-notice-error').html('<p><strong>Error:</strong> ' + (response.data && response.data.message ? response.data.message : 'Unknown error') + '</p>').show();
+            }
+        })
+        .fail(function() {
+            spinner.removeClass('is-active');
+            $btn.prop('disabled', false);
+            resultDiv.addClass('wt-notice-error').html('<p><strong><?php esc_html_e( 'Request failed.', 'woo-trendyol' ); ?></strong></p>').show();
         });
     });
 });
