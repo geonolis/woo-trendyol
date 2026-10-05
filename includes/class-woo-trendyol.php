@@ -339,6 +339,17 @@ class Woo_Trendyol {
 
         // Brand sync card injected into settings sidebar.
         $this->loader->add_action( 'wt_settings_sidebar_cards', $brand_admin, 'render_brand_sync_card' );
+
+        // Order Attribution origin & created_via filter
+        $this->loader->add_filter( 'wc_order_attribution_origin_label',            $admin, 'filter_order_attribution_origin_label', 10, 4 );
+        $this->loader->add_filter( 'wc_order_attribution_origin_formatted_source', $admin, 'filter_order_attribution_formatted_source', 10, 2 );
+
+        // Inject "Trendyol" into #filter-by-created-via on orders list table (HPOS and classic CPT)
+        $this->loader->add_action( 'woocommerce_order_list_table_restrict_manage_orders', $admin, 'start_created_via_buffer', 5 );
+        $this->loader->add_action( 'woocommerce_order_list_table_restrict_manage_orders', $admin, 'end_created_via_buffer', 25 );
+        $this->loader->add_action( 'restrict_manage_posts',                              $admin, 'start_created_via_buffer', 5 );
+        $this->loader->add_action( 'restrict_manage_posts',                              $admin, 'end_created_via_buffer', 25 );
+        $this->loader->add_action( 'admin_footer',                                        $admin, 'render_created_via_filter_script' );
     }
 
     // -----------------------------------------------------------------------

@@ -536,13 +536,14 @@ class Woo_Trendyol_Order_Sync {
 
             // Origin / created via
             $order->set_created_via( 'trendyol' );
+            $order->update_meta_data( '_created_via',                      'trendyol' );
 
             // Set payment method origin
             $order->set_payment_method( 'trendyol' );
             $order->set_payment_method_title( 'Trendyol' );
 
             // Order Attribution metadata (WooCommerce 8.5+ & HPOS compatible)
-            $order->update_meta_data( '_wc_order_attribution_source_type',   'typein' );
+            $order->update_meta_data( '_wc_order_attribution_source_type',   'utm' );
             $order->update_meta_data( '_wc_order_attribution_origin',        'Trendyol' );
             $order->update_meta_data( '_wc_order_attribution_utm_source',    'Trendyol' );
             $order->update_meta_data( '_wc_order_attribution_utm_medium',    'marketplace' );

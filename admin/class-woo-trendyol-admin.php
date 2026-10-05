@@ -94,6 +94,15 @@ class Woo_Trendyol_Admin {
      */
     private Woo_Trendyol_Product_Creator $product_creator;
 
+    /**
+     * Whether output buffering for created_via filter dropdown is currently active.
+     *
+     * @since  1.0.0
+     * @access private
+     * @var    bool $created_via_buffering
+     */
+    private bool $created_via_buffering = false;
+
     // -----------------------------------------------------------------------
     // Constructor
     // -----------------------------------------------------------------------
@@ -4156,6 +4165,136 @@ class Woo_Trendyol_Admin {
             echo $pdf_content; // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- Raw PDF binary stream.
         }
         exit;
+    }
+
+
+    // -----------------------------------------------------------------------
+    // Order Attribution & Created-Via Filter Hooks
+    // -----------------------------------------------------------------------
+
+    /**
+     * Filter WooCommerce Order Attribution origin label for Trendyol orders.
+     *
+     * Returns '%s' so the formatted source ("Trendyol") is displayed cleanly
+     * without "Source: " prefix.
+     *
+     * @since 1.0.0
+     * @param string $label            The label format (e.g. "Source: %s").
+     * @param string $source_type      The source type.
+     * @param string $source           The raw source.
+     * @param string $formatted_source The formatted source.
+     * @return string
+     */
+    public function filter_order_attribution_origin_label( $label, $source_type, $source, $formatted_source ): string {
+        if ( 0 === strcasecmp( (string) $source, 'trendyol' ) || 0 === strcasecmp( (string) $formatted_source, 'trendyol' ) || 'trendyol' === $source_type ) {
+            return '%s';
+        }
+        return (string) $label;
+    }
+
+    /**
+     * Filter WooCommerce Order Attribution formatted source for Trendyol orders.
+     *
+     * @since 1.0.0
+     * @param string $formatted_source The formatted source.
+     * @param string $raw_source       The raw source.
+     * @return string
+     */
+    public function filter_order_attribution_formatted_source( $formatted_source, $raw_source ): string {
+        if ( 0 === strcasecmp( (string) $raw_source, 'trendyol' ) ) {
+            return 'Trendyol';
+        }
+        return (string) $formatted_source;
+    }
+
+    /**
+     * Start output buffering before WooCommerce renders order list filters.
+     *
+     * Hooked to 'woocommerce_order_list_table_restrict_manage_orders' (priority 5)
+     * and 'restrict_manage_posts' (priority 5).
+     *
+     * @since 1.0.0
+     * @param string $order_type The order type.
+     * @param string $which      The table nav position ('top' or 'bottom').
+     */
+    public function start_created_via_buffer( $order_type = '', $which = '' ): void {
+        $this->created_via_buffering = true;
+        ob_start();
+    }
+
+    /**
+     * End output buffering and inject "Trendyol" option into #filter-by-created-via dropdown.
+     *
+     * Hooked to 'woocommerce_order_list_table_restrict_manage_orders' (priority 25)
+     * and 'restrict_manage_posts' (priority 25).
+     *
+     * @since 1.0.0
+     * @param string $order_type The order type.
+     * @param string $which      The table nav position ('top' or 'bottom').
+     */
+    public function end_created_via_buffer( $order_type = '', $which = '' ): void {
+        if ( ! $this->created_via_buffering ) {
+            return;
+        }
+        $this->created_via_buffering = false;
+
+        $html = ob_get_clean();
+        if ( false === $html || '' === $html ) {
+            return;
+        }
+
+        if ( false !== strpos( $html, 'filter-by-created-via' ) && false === strpos( $html, 'value="trendyol"' ) ) {
+            // phpcs:disable WordPress.Security.NonceVerification.Recommended
+            $current_created_via = isset( $_GET['_created_via'] ) ? sanitize_text_field( wp_unslash( $_GET['_created_via'] ) ) : '';
+            // phpcs:enable WordPress.Security.NonceVerification.Recommended
+            $selected = selected( 'trendyol', $current_created_via, false );
+            $option   = "\n\t\t\t<option value=\"trendyol\"" . $selected . ">" . esc_html__( 'Trendyol', 'woo-trendyol' ) . "</option>";
+
+            $html = preg_replace(
+                '/(<select[^>]*id=[\x27"]filter-by-created-via[\x27"][^>]*>.*?)(\s*<\/select>)/s',
+                '$1' . $option . '$2',
+                $html
+            );
+        }
+
+        echo $html; // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped
+    }
+
+    /**
+     * Output inline JS in admin footer on orders screens to ensure #filter-by-created-via
+     * always contains the "Trendyol" option, even if rendered dynamically.
+     *
+     * @since 1.0.0
+     */
+    public function render_created_via_filter_script(): void {
+        $screen = get_current_screen();
+        if ( ! $screen ) {
+            return;
+        }
+
+        if ( 'woocommerce_page_wc-orders' !== $screen->id && 'edit-shop_order' !== $screen->id && 'shop_order' !== $screen->id ) {
+            return;
+        }
+        ?>
+        <script type="text/javascript">
+        jQuery(function($) {
+            var $select = $('#filter-by-created-via');
+            if ($select.length && !$select.find('option[value="trendyol"]').length) {
+                var urlParams = new URLSearchParams(window.location.search);
+                var current = urlParams.get('_created_via') || '';
+                var isSelected = (current === 'trendyol');
+                var $opt = $('<option>', {
+                    value: 'trendyol',
+                    text: 'Trendyol'
+                });
+                if (isSelected) {
+                    $opt.prop('selected', true);
+                }
+                $select.append($opt);
+            }
+        });
+        </script>
+        <?php
     }
 
 }
