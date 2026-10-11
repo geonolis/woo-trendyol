@@ -240,7 +240,7 @@ class Woo_Trendyol_Category_Helper {
             return false;
         }
 
-        $cache_key = "wt_cat_supports_slicers_" . $category_id;
+        $cache_key = "wt_cat_supports_slicers_v2_" . $category_id;
         $cached    = get_transient( $cache_key );
         if ( false !== $cached ) {
             return (bool) $cached;
@@ -254,25 +254,11 @@ class Woo_Trendyol_Category_Helper {
             return false;
         }
 
-        $variant_keywords = [
-            "χρωμα", "χρώμα", "renk", "color",
-            "μεγεθος", "μέγεθος", "beden", "size", "ebat", "numara",
-            "σχεδιο", "σχέδιο", "desen", "pattern", "model",
-        ];
-
         $supports = false;
         foreach ( $schema["categoryAttributes"] as $attr ) {
-            if ( ! empty( $attr["slicer"] ) ) {
+            if ( ! empty( $attr["slicer"] ) || ! empty( $attr["varianter"] ) ) {
                 $supports = true;
                 break;
-            }
-
-            $name_lower = mb_strtolower( trim( $attr["attribute"]["name"] ?? "" ) );
-            foreach ( $variant_keywords as $kw ) {
-                if ( mb_stripos( $name_lower, $kw ) !== false ) {
-                    $supports = true;
-                    break 2;
-                }
             }
         }
 
@@ -307,7 +293,7 @@ class Woo_Trendyol_Category_Helper {
         $supports_slicers = $this->category_supports_slicers( $category_id );
         if ( ! $supports_slicers ) {
             $global_split = get_option( "trendyol_split_variations_without_slicers", "yes" );
-            return "yes" === $global_split;
+            return "no" !== $global_split;
         }
 
         return false;
