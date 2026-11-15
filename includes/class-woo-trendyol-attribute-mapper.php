@@ -182,7 +182,12 @@ class Woo_Trendyol_Attribute_Mapper {
             }
 
             $allow_custom = ! empty( $cat_attr['allowCustom'] );
-            $attr_values  = $cat_attr['attributeValues'] ?? [];
+            $attr_values  = $this->get_category_attribute_values_list(
+                $category_id,
+                $attr_id,
+                $cat_attr['attributeValues'] ?? [],
+                $allow_custom
+            );
 
             // Attempt to resolve the attribute value.
             $resolved = $this->resolve_attribute(
@@ -212,23 +217,10 @@ class Woo_Trendyol_Attribute_Mapper {
                     if ( $allow_custom ) {
                         $resolved = [ 'attributeId' => $attr_id, 'customAttributeValue' => 'Πολύχρωμο' ];
                     } else {
-                        // Ensure we have values
-                        if ( empty( $attr_values ) ) {
-                            $values_res = $this->api->get_attribute_values( $category_id, $attr_id );
-                            if ( ! is_wp_error( $values_res ) && ! empty( $values_res['content'] ) ) {
-                                foreach ( $values_res['content'] as $v ) {
-                                    $attr_values[] = [
-                                        'id'   => (int) $v['attributeValueId'],
-                                        'name' => (string) $v['attributeValue'],
-                                    ];
-                                }
-                            }
-                        }
-
-                        // Search for match by name or ID
+                        // Search for match by name or ID within valid category values
                         foreach ( $attr_values as $av ) {
                             $av_name_lower = mb_strtolower( trim( $av['name'] ) );
-                            if ( $av_name_lower === 'πολύχρωμο' || $av_name_lower === 'çok renkli' || $av['id'] == 686230 ) {
+                            if ( $av_name_lower === 'πολύχρωμο' || $av_name_lower === 'çok renkli' || $av_name_lower === 'multicolor' || $av_name_lower === 'multi-color' || (int) $av['id'] === 686230 ) {
                                 $resolved = [ 'attributeId' => $attr_id, 'attributeValueId' => (int) $av['id'] ];
                                 break;
                             }
@@ -551,13 +543,25 @@ class Woo_Trendyol_Attribute_Mapper {
 
             if ( ! empty( $value_map ) && ! empty( $product_slugs ) ) {
                 foreach ( $product_slugs as $slug ) {
-                    if ( isset( $value_map[ $slug ] ) ) {
-                        return [ 'attributeId' => $attr_id, 'attributeValueId' => (int) $value_map[ $slug ] ];
+                    if ( isset( $value_map[ $slug ] ) && ! empty( $value_map[ $slug ] ) ) {
+                        $validated = $this->validate_or_remap_attribute_value(
+                            $attr_id,
+                            $attr_name,
+                            (int) $value_map[ $slug ],
+                            $attr_values,
+                            $allow_custom,
+                            $product,
+                            $mapped_wc_slug,
+                            $wc_attributes
+                        );
+                        if ( null !== $validated ) {
+                            return $validated;
+                        }
                     }
                 }
             }
 
-            // Fall back to exact name matching if no custom value mapping was found
+            // Fall back to name/semantic matching against valid category values
             $normalised_slug = $this->normalise_slug( $mapped_wc_slug );
             $wc_value        = $wc_attributes[ $normalised_slug ] ?? null;
 
@@ -569,7 +573,17 @@ class Woo_Trendyol_Attribute_Mapper {
             }
 
             if ( $wc_value ) {
-                return $this->match_value( $attr_id, $wc_value, $attr_values, $allow_custom );
+                $matched = $this->match_value( $attr_id, $wc_value, $attr_values, $allow_custom, $attr_name );
+                if ( null !== $matched ) {
+                    return $matched;
+                }
+            }
+
+            foreach ( $this->get_product_term_names( $product, $mapped_wc_slug ) as $term_name ) {
+                $matched = $this->match_value( $attr_id, $term_name, $attr_values, $allow_custom, $attr_name );
+                if ( null !== $matched ) {
+                    return $matched;
+                }
             }
         }
 
@@ -596,7 +610,19 @@ class Woo_Trendyol_Attribute_Mapper {
                 if ( $is_term_key_map ) {
                     foreach ( $dyn_product_slugs as $slug ) {
                         if ( isset( $dyn_value_map[ $slug ] ) && ! empty( $dyn_value_map[ $slug ] ) ) {
-                            return [ 'attributeId' => $attr_id, 'attributeValueId' => (int) $dyn_value_map[ $slug ] ];
+                            $validated = $this->validate_or_remap_attribute_value(
+                                $attr_id,
+                                $attr_name,
+                                (int) $dyn_value_map[ $slug ],
+                                $attr_values,
+                                $allow_custom,
+                                $product,
+                                $dyn_wc_slug,
+                                $wc_attributes
+                            );
+                            if ( null !== $validated ) {
+                                return $validated;
+                            }
                         }
                     }
                 } else {
@@ -604,7 +630,19 @@ class Woo_Trendyol_Attribute_Mapper {
                     foreach ( $dyn_product_slugs as $slug ) {
                         foreach ( $dyn_value_map as $ty_val_id => $mapped_slugs ) {
                             if ( in_array( $slug, (array) $mapped_slugs, true ) ) {
-                                return [ 'attributeId' => $attr_id, 'attributeValueId' => (int) $ty_val_id ];
+                                $validated = $this->validate_or_remap_attribute_value(
+                                    $attr_id,
+                                    $attr_name,
+                                    (int) $ty_val_id,
+                                    $attr_values,
+                                    $allow_custom,
+                                    $product,
+                                    $dyn_wc_slug,
+                                    $wc_attributes
+                                );
+                                if ( null !== $validated ) {
+                                    return $validated;
+                                }
                             }
                         }
                     }
@@ -628,8 +666,8 @@ class Woo_Trendyol_Attribute_Mapper {
                         $val = (string) get_post_meta( $product->get_id(), $meta_key, true );
                         if ( '' !== $val ) { return [ 'attributeId' => $attr_id, 'customAttributeValue' => $val ]; }
                     } else {
-                        $term_names = wp_get_post_terms( $product->get_id(), $dyn_wc_slug, [ 'fields' => 'names' ] );
-                        if ( ! is_wp_error( $term_names ) && ! empty( $term_names ) ) {
+                        $term_names = $this->get_product_term_names( $product, $dyn_wc_slug );
+                        if ( ! empty( $term_names ) ) {
                             return [ 'attributeId' => $attr_id, 'customAttributeValue' => $term_names[0] ];
                         }
                         $attr_val = $product->get_attribute( $dyn_wc_slug );
@@ -637,11 +675,18 @@ class Woo_Trendyol_Attribute_Mapper {
                             return [ 'attributeId' => $attr_id, 'customAttributeValue' => $attr_val ];
                         }
                     }
+                } else {
+                    foreach ( $this->get_product_term_names( $product, $dyn_wc_slug ) as $term_name ) {
+                        $matched = $this->match_value( $attr_id, $term_name, $attr_values, $allow_custom, $attr_name );
+                        if ( null !== $matched ) {
+                            return $matched;
+                        }
+                    }
                 }
             }
         }
 
-        // --- Priority 2.5: Legacy Global settings (Brand/Character) ---
+        // --- Priority 2.5: Legacy Global settings (Brand/Character/Gender/Age/Color) ---
         $global_slot = $this->get_global_slot( $attr_name );
         if ( 'color' === $global_slot && $allow_custom ) {
             $global_slot = 'color_custom';
@@ -651,6 +696,7 @@ class Woo_Trendyol_Attribute_Mapper {
             $resolved = $this->resolve_from_global(
                 $global_slot,
                 $attr_id,
+                $attr_name,
                 $attr_values,
                 $allow_custom,
                 $global_settings,
@@ -668,7 +714,7 @@ class Woo_Trendyol_Attribute_Mapper {
         $wc_value        = $wc_attributes[ $normalised_attr ] ?? null;
 
         if ( $wc_value ) {
-            return $this->match_value( $attr_id, $wc_value, $attr_values, $allow_custom );
+            return $this->match_value( $attr_id, $wc_value, $attr_values, $allow_custom, $attr_name );
         }
 
         return null;
@@ -694,6 +740,7 @@ class Woo_Trendyol_Attribute_Mapper {
     private function resolve_from_global(
         string $slot,
         int $attr_id,
+        string $attr_name,
         array $attr_values,
         bool $allow_custom,
         array $global_settings,
@@ -723,7 +770,7 @@ class Woo_Trendyol_Attribute_Mapper {
                 $wc_slug  = $global_settings[ $slot . '_wc' ]  ?? '';
                 $value_map = $global_settings[ $slot . '_map' ] ?? [];
 
-                if ( empty( $wc_slug ) || empty( $value_map ) ) {
+                if ( empty( $wc_slug ) ) {
                     break;
                 }
 
@@ -733,9 +780,30 @@ class Woo_Trendyol_Attribute_Mapper {
                     break;
                 }
 
-                foreach ( $product_slugs as $slug ) {
-                    if ( isset( $value_map[ $slug ] ) && ! empty( $value_map[ $slug ] ) ) {
-                        return [ 'attributeId' => $attr_id, 'attributeValueId' => (int) $value_map[ $slug ] ];
+                if ( ! empty( $value_map ) ) {
+                    foreach ( $product_slugs as $slug ) {
+                        if ( isset( $value_map[ $slug ] ) && ! empty( $value_map[ $slug ] ) ) {
+                            $validated = $this->validate_or_remap_attribute_value(
+                                $attr_id,
+                                $attr_name,
+                                (int) $value_map[ $slug ],
+                                $attr_values,
+                                $allow_custom,
+                                $product,
+                                $wc_slug,
+                                $wc_attributes
+                            );
+                            if ( null !== $validated ) {
+                                return $validated;
+                            }
+                        }
+                    }
+                }
+
+                foreach ( $this->get_product_term_names( $product, $wc_slug ) as $term_name ) {
+                    $matched = $this->match_value( $attr_id, $term_name, $attr_values, $allow_custom, $attr_name );
+                    if ( null !== $matched ) {
+                        return $matched;
                     }
                 }
                 break;
@@ -746,7 +814,7 @@ class Woo_Trendyol_Attribute_Mapper {
                 $wc_slug  = $global_settings[ $slot . '_wc' ]  ?? '';
                 $value_map = $global_settings[ $slot . '_map' ] ?? [];
 
-                if ( empty( $wc_slug ) || empty( $value_map ) ) {
+                if ( empty( $wc_slug ) ) {
                     break;
                 }
 
@@ -758,15 +826,56 @@ class Woo_Trendyol_Attribute_Mapper {
                 }
 
                 // Walk the value map: { "trendyol_value_id": ["wc_slug", …], … }
-                // Return the first Trendyol value whose mapped slugs intersect
-                // with the product's term slugs.
-                foreach ( $value_map as $ty_value_id => $mapped_slugs ) {
-                    if ( ! is_array( $mapped_slugs ) ) {
-                        $mapped_slugs = [ $mapped_slugs ];
+                // or { "wc_slug": "trendyol_value_id" }
+                if ( ! empty( $value_map ) ) {
+                    $first_val = reset( $value_map );
+                    if ( ! is_array( $first_val ) ) {
+                        foreach ( $product_slugs as $slug ) {
+                            if ( isset( $value_map[ $slug ] ) && ! empty( $value_map[ $slug ] ) ) {
+                                $validated = $this->validate_or_remap_attribute_value(
+                                    $attr_id,
+                                    $attr_name,
+                                    (int) $value_map[ $slug ],
+                                    $attr_values,
+                                    $allow_custom,
+                                    $product,
+                                    $wc_slug,
+                                    $wc_attributes
+                                );
+                                if ( null !== $validated ) {
+                                    return $validated;
+                                }
+                            }
+                        }
+                    } else {
+                        foreach ( $value_map as $ty_value_id => $mapped_slugs ) {
+                            if ( ! is_array( $mapped_slugs ) ) {
+                                $mapped_slugs = [ $mapped_slugs ];
+                            }
+                            $intersection = array_intersect( $product_slugs, $mapped_slugs );
+                            if ( ! empty( $intersection ) ) {
+                                $validated = $this->validate_or_remap_attribute_value(
+                                    $attr_id,
+                                    $attr_name,
+                                    (int) $ty_value_id,
+                                    $attr_values,
+                                    $allow_custom,
+                                    $product,
+                                    $wc_slug,
+                                    $wc_attributes
+                                );
+                                if ( null !== $validated ) {
+                                    return $validated;
+                                }
+                            }
+                        }
                     }
-                    $intersection = array_intersect( $product_slugs, $mapped_slugs );
-                    if ( ! empty( $intersection ) ) {
-                        return [ 'attributeId' => $attr_id, 'attributeValueId' => (int) $ty_value_id ];
+                }
+
+                foreach ( $this->get_product_term_names( $product, $wc_slug ) as $term_name ) {
+                    $matched = $this->match_value( $attr_id, $term_name, $attr_values, $allow_custom, $attr_name );
+                    if ( null !== $matched ) {
+                        return $matched;
                     }
                 }
                 break;
@@ -780,7 +889,7 @@ class Woo_Trendyol_Attribute_Mapper {
                     $wc_value   = $wc_attributes[ $normalised ] ?? null;
 
                     if ( $wc_value ) {
-                        return $this->match_value( $attr_id, $wc_value, $attr_values, $allow_custom );
+                        return $this->match_value( $attr_id, $wc_value, $attr_values, $allow_custom, $attr_name );
                     }
 
                     // Fallback: try the product's brand meta (WooCommerce Brands plugin).
@@ -791,7 +900,7 @@ class Woo_Trendyol_Attribute_Mapper {
                         }
                         if ( $brand_terms && ! is_wp_error( $brand_terms ) ) {
                             $brand_name = $brand_terms[0]->name;
-                            return $this->match_value( $attr_id, $brand_name, $attr_values, $allow_custom );
+                            return $this->match_value( $attr_id, $brand_name, $attr_values, $allow_custom, $attr_name );
                         }
                     }
                 }
@@ -799,6 +908,229 @@ class Woo_Trendyol_Attribute_Mapper {
         }
 
         return null;
+    }
+
+    /**
+     * Fetch and normalize the authoritative list of allowed attribute values for a category attribute.
+     *
+     * Prefers the storefront-scoped attribute values endpoint, falling back to inline schema values.
+     *
+     * @since  1.2.0
+     * @access private
+     * @param  int   $category_id   Trendyol category ID.
+     * @param  int   $attr_id       Trendyol attribute ID.
+     * @param  array $inline_values Inline attributeValues from the category schema.
+     * @param  bool  $allow_custom  Whether custom free-text values are allowed.
+     * @return array Array of [ 'id' => int, 'name' => string ].
+     */
+    private function get_category_attribute_values_list(
+        int $category_id,
+        int $attr_id,
+        array $inline_values,
+        bool $allow_custom
+    ): array {
+        if ( $allow_custom && empty( $inline_values ) ) {
+            return [];
+        }
+
+        $values = [];
+
+        if ( ! $allow_custom ) {
+            $values_res = $this->api->get_attribute_values( $category_id, $attr_id );
+            if ( ! is_wp_error( $values_res ) && ! empty( $values_res['content'] ) && is_array( $values_res['content'] ) ) {
+                foreach ( $values_res['content'] as $v ) {
+                    $vid = (int) ( $v['attributeValueId'] ?? $v['id'] ?? 0 );
+                    if ( $vid ) {
+                        $values[ $vid ] = [
+                            'id'   => $vid,
+                            'name' => (string) ( $v['attributeValue'] ?? $v['name'] ?? '' ),
+                        ];
+                    }
+                }
+            }
+        }
+
+        if ( empty( $values ) && ! empty( $inline_values ) ) {
+            foreach ( $inline_values as $v ) {
+                $vid = (int) ( $v['id'] ?? $v['attributeValueId'] ?? 0 );
+                if ( $vid ) {
+                    $values[ $vid ] = [
+                        'id'   => $vid,
+                        'name' => (string) ( $v['name'] ?? $v['attributeValue'] ?? '' ),
+                    ];
+                }
+            }
+        }
+
+        return array_values( $values );
+    }
+
+    /**
+     * Validate that a mapped Trendyol attributeValueId is allowed in the target category's
+     * attribute values list. If not allowed, attempt to remap it by matching its cached
+     * label or the product's WooCommerce attribute term names against the category's valid values.
+     *
+     * @since  1.2.0
+     * @access private
+     * @param  int        $attr_id       Trendyol attribute ID.
+     * @param  string     $attr_name     Trendyol attribute name.
+     * @param  int        $candidate_id  Mapped Trendyol attributeValueId.
+     * @param  array      $attr_values   Allowed attribute values for this category.
+     * @param  bool       $allow_custom  Whether custom values are allowed.
+     * @param  WC_Product $product       The WooCommerce product.
+     * @param  string     $wc_slug       The WooCommerce attribute slug used for mapping.
+     * @param  array      $wc_attributes Normalised WC product attributes map.
+     * @return array|null Validated/remapped attribute entry, or null if invalid for this category.
+     */
+    private function validate_or_remap_attribute_value(
+        int $attr_id,
+        string $attr_name,
+        int $candidate_id,
+        array $attr_values,
+        bool $allow_custom,
+        WC_Product $product,
+        string $wc_slug,
+        array $wc_attributes
+    ): ?array {
+        if ( $candidate_id <= 0 ) {
+            return null;
+        }
+
+        // If the category schema provides no predefined values list, accept the mapped ID directly.
+        if ( empty( $attr_values ) ) {
+            return [ 'attributeId' => $attr_id, 'attributeValueId' => $candidate_id ];
+        }
+
+        // 1. Check if the mapped ID is directly valid in this category.
+        foreach ( $attr_values as $av ) {
+            if ( (int) ( $av['id'] ?? 0 ) === $candidate_id ) {
+                return [ 'attributeId' => $attr_id, 'attributeValueId' => $candidate_id ];
+            }
+        }
+
+        // 2. Candidate ID is not in this category's allowed values.
+        //    Collect candidate human-readable labels to match against this category's allowed values.
+        $candidate_labels = [];
+
+        $cached_ty_label = $this->get_cached_trendyol_value_name( $attr_id, $candidate_id );
+        if ( '' !== $cached_ty_label ) {
+            $candidate_labels[] = $cached_ty_label;
+        }
+
+        if ( '' !== $wc_slug ) {
+            foreach ( $this->get_product_term_names( $product, $wc_slug ) as $t_name ) {
+                if ( '' !== $t_name ) {
+                    $candidate_labels[] = $t_name;
+                }
+            }
+            $norm_wc = $this->normalise_slug( $wc_slug );
+            if ( ! empty( $wc_attributes[ $norm_wc ] ) ) {
+                $candidate_labels[] = (string) $wc_attributes[ $norm_wc ];
+            }
+        }
+
+        $norm_attr = $this->normalise_slug( $attr_name );
+        if ( ! empty( $wc_attributes[ $norm_attr ] ) ) {
+            $candidate_labels[] = (string) $wc_attributes[ $norm_attr ];
+        }
+
+        $candidate_labels = array_values( array_unique( array_filter( array_map( 'trim', $candidate_labels ) ) ) );
+
+        foreach ( $candidate_labels as $label ) {
+            $matched = $this->match_value( $attr_id, $label, $attr_values, $allow_custom, $attr_name );
+            if ( null !== $matched ) {
+                return $matched;
+            }
+        }
+
+        // Do not send an invalid attributeValueId that Trendyol will reject.
+        return null;
+    }
+
+    /**
+     * Look up the cached human-readable name for a Trendyol attributeValueId.
+     *
+     * @since  1.2.0
+     * @access private
+     * @param  int $attr_id  Trendyol attribute ID.
+     * @param  int $value_id Trendyol attribute value ID.
+     * @return string Cached label or empty string.
+     */
+    private function get_cached_trendyol_value_name( int $attr_id, int $value_id ): string {
+        $names_cache = get_option( 'trendyol_global_attr_names_cache', [] );
+        if ( is_array( $names_cache ) && ! empty( $names_cache[ $value_id ] ) ) {
+            return (string) $names_cache[ $value_id ];
+        }
+
+        $discovered = get_option( 'trendyol_discovered_global_attrs', [] );
+        if ( is_array( $discovered ) ) {
+            foreach ( $discovered as $g_attr ) {
+                if ( (int) ( $g_attr['id'] ?? 0 ) === $attr_id && ! empty( $g_attr['values'] ) && is_array( $g_attr['values'] ) ) {
+                    foreach ( $g_attr['values'] as $v ) {
+                        if ( (int) ( $v['id'] ?? 0 ) === $value_id && ! empty( $v['name'] ) ) {
+                            return (string) $v['name'];
+                        }
+                    }
+                }
+            }
+        }
+
+        return '';
+    }
+
+    /**
+     * Get human-readable term names (or raw values) for a WooCommerce attribute on a product.
+     *
+     * @since  1.2.0
+     * @access private
+     * @param  WC_Product $product The WooCommerce product.
+     * @param  string     $wc_slug Taxonomy or custom attribute slug.
+     * @return string[] Array of term names / option values.
+     */
+    private function get_product_term_names( WC_Product $product, string $wc_slug ): array {
+        if ( empty( $wc_slug ) ) {
+            return [];
+        }
+
+        if ( in_array( $wc_slug, [ 'dim_length', 'dim_width', 'dim_height', 'dim_weight' ], true ) || 0 === strpos( $wc_slug, 'meta:' ) ) {
+            $slugs = $this->get_product_term_slugs( $product, $wc_slug );
+            return ! empty( $slugs ) ? [ $slugs[0] ] : [];
+        }
+
+        if ( taxonomy_exists( $wc_slug ) ) {
+            $names = wc_get_product_terms( $product->get_id(), $wc_slug, [ 'fields' => 'names' ] );
+            if ( ! is_wp_error( $names ) && ! empty( $names ) ) {
+                return array_values( array_filter( array_map( 'strval', $names ) ) );
+            }
+            $attr_val = $product->get_attribute( $wc_slug );
+            if ( ! empty( $attr_val ) ) {
+                $term = get_term_by( 'slug', $attr_val, $wc_slug );
+                if ( $term && ! is_wp_error( $term ) ) {
+                    return [ (string) $term->name ];
+                }
+                return array_values( array_filter( array_map( 'trim', explode( ',', $attr_val ) ) ) );
+            }
+            if ( $product->get_parent_id() ) {
+                $parent_names = wc_get_product_terms( $product->get_parent_id(), $wc_slug, [ 'fields' => 'names' ] );
+                if ( ! is_wp_error( $parent_names ) && ! empty( $parent_names ) ) {
+                    return array_values( array_filter( array_map( 'strval', $parent_names ) ) );
+                }
+            }
+        }
+
+        $attr_val = $product->get_attribute( $wc_slug );
+        if ( empty( $attr_val ) && $product->get_parent_id() ) {
+            $parent = wc_get_product( $product->get_parent_id() );
+            if ( $parent ) {
+                $attr_val = $parent->get_attribute( $wc_slug );
+            }
+        }
+
+        if ( ! empty( $attr_val ) ) {
+            return array_values( array_filter( array_map( 'trim', explode( ',', $attr_val ) ) ) );
+        }
+
+        return [];
     }
 
     /**
@@ -894,33 +1226,225 @@ class Woo_Trendyol_Attribute_Mapper {
     /**
      * Match a string value against the predefined Trendyol attribute values list.
      *
-     * Tries exact match first, then case-insensitive match.
+     * Tries exact match first, then normalized text match, then semantic/numeric
+     * matching for gender/age_group/age, then safe substring match.
      * If allowCustom is true and no match is found, returns a customAttributeValue entry.
      *
      * @since  1.0.0
      * @access private
-     * @param  int    $attr_id     Trendyol attribute ID.
-     * @param  string $value       The value string to match.
-     * @param  array  $attr_values Predefined attribute values [ { id, name }, … ].
+     * @param  int    $attr_id      Trendyol attribute ID.
+     * @param  string $value        The value string to match.
+     * @param  array  $attr_values  Predefined attribute values [ { id, name }, … ].
      * @param  bool   $allow_custom Whether custom string values are accepted.
+     * @param  string $attr_name    Optional Trendyol attribute name for slot-aware matching.
      * @return array|null Resolved attribute object or null.
      */
-    private function match_value( int $attr_id, string $value, array $attr_values, bool $allow_custom ): ?array {
-        $value_lower = strtolower( trim( $value ) );
+    private function match_value( int $attr_id, string $value, array $attr_values, bool $allow_custom, string $attr_name = '' ): ?array {
+        $value_trimmed = trim( $value );
+        if ( '' === $value_trimmed ) {
+            return null;
+        }
 
-        // Exact match.
-        foreach ( $attr_values as $av ) {
-            if ( strtolower( trim( $av['name'] ) ) === $value_lower ) {
-                return [ 'attributeId' => $attr_id, 'attributeValueId' => (int) $av['id'] ];
+        if ( ! empty( $attr_values ) ) {
+            $value_lower = mb_strtolower( $value_trimmed );
+
+            // 1. Exact case-insensitive match.
+            foreach ( $attr_values as $av ) {
+                if ( mb_strtolower( trim( (string) ( $av['name'] ?? '' ) ) ) === $value_lower ) {
+                    return [ 'attributeId' => $attr_id, 'attributeValueId' => (int) $av['id'] ];
+                }
+            }
+
+            // 2. Normalized accent/punctuation-stripped match.
+            $value_norm = $this->normalise_match_text( $value_trimmed );
+            if ( '' !== $value_norm ) {
+                foreach ( $attr_values as $av ) {
+                    if ( $this->normalise_match_text( (string) ( $av['name'] ?? '' ) ) === $value_norm ) {
+                        return [ 'attributeId' => $attr_id, 'attributeValueId' => (int) $av['id'] ];
+                    }
+                }
+            }
+
+            // 3. Slot-specific semantic & numeric matching (Gender, Age Group, Age).
+            $slot = '' !== $attr_name ? $this->get_global_slot( $attr_name ) : null;
+            if ( ! $slot ) {
+                if ( 343 === $attr_id ) {
+                    $slot = 'gender';
+                } elseif ( 279 === $attr_id ) {
+                    $slot = 'age';
+                } elseif ( 346 === $attr_id ) {
+                    $slot = 'age_group';
+                }
+            }
+
+            if ( 'gender' === $slot || 343 === $attr_id ) {
+                $gender_groups = [
+                    'unisex' => [ 'unisex', 'uniseks', 'ουδετερο', 'αγορι κοριτσι', 'κοριτσι αγορι', 'boy girl', 'boys girls', 'girl boy', 'girls boys', 'kiz erkek', 'erkek kiz', 'ανδρικο γυναικειο', 'γυναικειο ανδρικο' ],
+                    'male'   => [ 'αγορι', 'αγορια', 'boy', 'boys', 'male', 'ανδρας', 'ανδρικο', 'ανδρικα', 'erkek' ],
+                    'female' => [ 'κοριτσι', 'κοριτσια', 'girl', 'girls', 'female', 'γυναικα', 'γυναικειο', 'γυναικεια', 'kiz', 'kadin' ],
+                ];
+                $target_group = null;
+                foreach ( $gender_groups as $grp => $terms ) {
+                    if ( in_array( $value_norm, $terms, true ) ) {
+                        $target_group = $grp;
+                        break;
+                    }
+                }
+                if ( $target_group ) {
+                    foreach ( $attr_values as $av ) {
+                        $av_norm = $this->normalise_match_text( (string) ( $av['name'] ?? '' ) );
+                        if ( in_array( $av_norm, $gender_groups[ $target_group ], true ) ) {
+                            return [ 'attributeId' => $attr_id, 'attributeValueId' => (int) $av['id'] ];
+                        }
+                    }
+                }
+            }
+
+            if ( 'age_group' === $slot ) {
+                $age_group_buckets = [
+                    'kids'  => [ 'παιδι', 'παιδια', 'παιδικο', 'παιδικα', 'ηλικια παιδιου', 'child', 'children', 'kids', 'kid', 'cocuk' ],
+                    'baby'  => [ 'μωρο', 'μωρα', 'βρεφος', 'βρεφη', 'βρεφικο', 'βρεφικα', 'νηπιο', 'νηπια', 'baby', 'babies', 'infant', 'toddler', 'bebek' ],
+                    'teen'  => [ 'εφηβος', 'εφηβοι', 'εφηβικο', 'εφηβικα', 'νεοι', 'teen', 'teens', 'youth', 'genc' ],
+                    'adult' => [ 'ενηλικας', 'ενηλικες', 'ενηλικοι', 'adult', 'adults', 'yetiskin' ],
+                ];
+                $target_bucket = null;
+                foreach ( $age_group_buckets as $bkt => $terms ) {
+                    if ( in_array( $value_norm, $terms, true ) ) {
+                        $target_bucket = $bkt;
+                        break;
+                    }
+                }
+                if ( $target_bucket ) {
+                    foreach ( $attr_values as $av ) {
+                        $av_norm = $this->normalise_match_text( (string) ( $av['name'] ?? '' ) );
+                        if ( in_array( $av_norm, $age_group_buckets[ $target_bucket ], true ) ) {
+                            return [ 'attributeId' => $attr_id, 'attributeValueId' => (int) $av['id'] ];
+                        }
+                    }
+                }
+            }
+
+            if ( 'age' === $slot || 279 === $attr_id ) {
+                if ( preg_match_all( '/\d+/', $value_trimmed, $val_num_matches ) && ! empty( $val_num_matches[0] ) ) {
+                    $val_nums     = array_map( 'intval', $val_num_matches[0] );
+                    $val_is_month = (bool) preg_match( '/(μην|month|\bay\b)/iu', $value_norm );
+                    $val_has_plus = false !== strpos( $value_trimmed, '+' );
+
+                    // 3a. Exact number sequence match (with matching unit).
+                    $exact_num_candidates = [];
+                    foreach ( $attr_values as $av ) {
+                        $av_name     = (string) ( $av['name'] ?? '' );
+                        $av_norm     = $this->normalise_match_text( $av_name );
+                        $av_is_month = (bool) preg_match( '/(μην|month|\bay\b)/iu', $av_norm );
+                        if ( $val_is_month !== $av_is_month ) {
+                            continue;
+                        }
+                        if ( preg_match_all( '/\d+/', $av_name, $av_num_matches ) && ! empty( $av_num_matches[0] ) ) {
+                            $av_nums = array_map( 'intval', $av_num_matches[0] );
+                            if ( $av_nums === $val_nums ) {
+                                if ( $val_has_plus && false !== strpos( $av_name, '+' ) ) {
+                                    return [ 'attributeId' => $attr_id, 'attributeValueId' => (int) $av['id'] ];
+                                }
+                                $exact_num_candidates[] = (int) $av['id'];
+                            }
+                        }
+                    }
+                    if ( ! empty( $exact_num_candidates ) ) {
+                        return [ 'attributeId' => $attr_id, 'attributeValueId' => $exact_num_candidates[0] ];
+                    }
+
+                    // 3b. Range / threshold match when category has coarser age options.
+                    if ( ! $val_is_month ) {
+                        $min_age          = $val_nums[0];
+                        $range_start_id   = null;
+                        $range_contain_id = null;
+                        $best_plus_id     = null;
+                        $best_plus_age    = -1;
+
+                        foreach ( $attr_values as $av ) {
+                            $av_name     = (string) ( $av['name'] ?? '' );
+                            $av_norm     = $this->normalise_match_text( $av_name );
+                            $av_is_month = (bool) preg_match( '/(μην|month|\bay\b)/iu', $av_norm );
+                            if ( $av_is_month ) {
+                                continue;
+                            }
+                            if ( ! preg_match_all( '/\d+/', $av_name, $av_num_matches ) || empty( $av_num_matches[0] ) ) {
+                                continue;
+                            }
+                            $av_nums = array_map( 'intval', $av_num_matches[0] );
+
+                            if ( count( $av_nums ) >= 2 ) {
+                                $r_min = $av_nums[0];
+                                $r_max = $av_nums[1];
+                                if ( null === $range_start_id && $r_min === $min_age ) {
+                                    $range_start_id = (int) $av['id'];
+                                }
+                                if ( null === $range_contain_id && $min_age >= $r_min && $min_age <= $r_max ) {
+                                    $range_contain_id = (int) $av['id'];
+                                }
+                            } elseif ( 1 === count( $av_nums ) && false !== strpos( $av_name, '+' ) ) {
+                                $p_age = $av_nums[0];
+                                if ( $p_age <= $min_age && $p_age > $best_plus_age ) {
+                                    $best_plus_age = $p_age;
+                                    $best_plus_id  = (int) $av['id'];
+                                }
+                            }
+                        }
+
+                        if ( null !== $range_start_id ) {
+                            return [ 'attributeId' => $attr_id, 'attributeValueId' => $range_start_id ];
+                        }
+                        if ( null !== $range_contain_id ) {
+                            return [ 'attributeId' => $attr_id, 'attributeValueId' => $range_contain_id ];
+                        }
+                        if ( null !== $best_plus_id ) {
+                            return [ 'attributeId' => $attr_id, 'attributeValueId' => $best_plus_id ];
+                        }
+                    }
+                }
+            }
+
+            // 4. Safe substring match (only when strings have no numbers and length >= 3).
+            if ( mb_strlen( $value_norm ) >= 3 && ! preg_match( '/\d/', $value_norm ) ) {
+                foreach ( $attr_values as $av ) {
+                    $av_norm = $this->normalise_match_text( (string) ( $av['name'] ?? '' ) );
+                    if ( mb_strlen( $av_norm ) >= 3 && ! preg_match( '/\d/', $av_norm ) ) {
+                        if ( false !== mb_strpos( $av_norm, $value_norm ) || false !== mb_strpos( $value_norm, $av_norm ) ) {
+                            return [ 'attributeId' => $attr_id, 'attributeValueId' => (int) $av['id'] ];
+                        }
+                    }
+                }
             }
         }
 
         // Custom value fallback.
-        if ( $allow_custom && ! empty( $value ) ) {
-            return [ 'attributeId' => $attr_id, 'customAttributeValue' => $value ];
+        if ( $allow_custom && '' !== $value_trimmed ) {
+            return [ 'attributeId' => $attr_id, 'customAttributeValue' => $value_trimmed ];
         }
 
         return null;
+    }
+
+    /**
+     * Normalize text for fuzzy attribute value comparison (lowercased, Greek/Turkish accents stripped,
+     * punctuation collapsed to single spaces).
+     *
+     * @since  1.2.0
+     * @access private
+     * @param  string $text Input string.
+     * @return string Normalized string.
+     */
+    private function normalise_match_text( string $text ): string {
+        $text = mb_strtolower( trim( $text ) );
+        $replacements = [
+            'ά' => 'α', 'έ' => 'ε', 'ή' => 'η', 'ί' => 'ι', 'ϊ' => 'ι', 'ΐ' => 'ι',
+            'ό' => 'ο', 'ύ' => 'υ', 'ϋ' => 'υ', 'ΰ' => 'υ', 'ώ' => 'ω', 'ς' => 'σ',
+            'ı' => 'i', 'ğ' => 'g', 'ü' => 'u', 'ş' => 's', 'ö' => 'o', 'ç' => 'c',
+        ];
+        $text = strtr( $text, $replacements );
+        $text = preg_replace( '/[\/\-_&+,.:;()]+/u', ' ', $text );
+        $text = preg_replace( '/\s+/u', ' ', $text );
+        return trim( (string) $text );
     }
 
     /**

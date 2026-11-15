@@ -2454,11 +2454,18 @@ class Woo_Trendyol_Admin {
 
         global $wpdb;
         $matched_product_ids = [];
+        $api_succeeded       = false;
 
-        // 1. Fetch unapproved products from Trendyol API (pages 0-9, up to 1000 items)
-        for ( $page = 0; $page < 10; $page++ ) {
+        // 1. Fetch live unapproved products from Trendyol API (authoritative source)
+        for ( $page = 0; $page < 50; $page++ ) {
             $ty_res = $this->api->get_unapproved_products( [ 'page' => $page, 'size' => 100 ] );
-            if ( is_wp_error( $ty_res ) || empty( $ty_res['content'] ) ) {
+            if ( is_wp_error( $ty_res ) ) {
+                break;
+            }
+
+            $api_succeeded = true;
+
+            if ( empty( $ty_res['content'] ) || ! is_array( $ty_res['content'] ) ) {
                 break;
             }
 
@@ -2473,9 +2480,6 @@ class Woo_Trendyol_Admin {
                 }
                 if ( ! $pid && ! empty( $stock_code ) ) {
                     $pid = wc_get_product_id_by_sku( $stock_code );
-                }
-                if ( ! $pid && ! empty( $product_main_id ) ) {
-                    $pid = wc_get_product_id_by_sku( $product_main_id );
                 }
                 if ( ! $pid && ! empty( $barcode ) ) {
                     $pid = (int) $wpdb->get_var(
@@ -2493,13 +2497,22 @@ class Woo_Trendyol_Admin {
                         )
                     );
                 }
+                if ( ! $pid && ! empty( $product_main_id ) ) {
+                    $candidate_pid = wc_get_product_id_by_sku( $product_main_id );
+                    if ( $candidate_pid ) {
+                        $candidate_prod = wc_get_product( $candidate_pid );
+                        if ( $candidate_prod && ! $candidate_prod->is_type( 'variable' ) ) {
+                            $pid = $candidate_pid;
+                        }
+                    }
+                }
 
                 if ( $pid ) {
                     $p = wc_get_product( $pid );
                     if ( $p ) {
-                        $parent_id = $p->get_parent_id();
-                        $target_id = $parent_id ? $parent_id : $pid;
-                        $matched_product_ids[ $target_id ] = true;
+                        // Keep the exact matched product/variation ID so we only update
+                        // variations that are actually in Trendyol's unapproved queue.
+                        $matched_product_ids[ (int) $pid ] = true;
                     }
                 }
             }
@@ -2510,38 +2523,65 @@ class Woo_Trendyol_Admin {
             }
         }
 
-        // 2. Also find WooCommerce products marked as not approved
-        $local_unapproved = get_posts( [
-            'post_type'      => 'product',
-            'post_status'    => 'publish',
-            'posts_per_page' => -1,
-            'fields'         => 'ids',
-            'meta_query'     => [
-                'relation' => 'AND',
-                [
-                    'key'     => '_trendyol_sent',
-                    'value'   => 'yes',
-                    'compare' => '=',
+        // 2. Fallback to local WooCommerce postmeta only if the Trendyol API query failed
+        if ( ! $api_succeeded ) {
+            $local_unapproved = get_posts( [
+                'post_type'      => [ 'product', 'product_variation' ],
+                'post_status'    => 'publish',
+                'posts_per_page' => -1,
+                'fields'         => 'ids',
+                'meta_query'     => [
+                    'relation' => 'AND',
+                    [
+                        'key'     => '_trendyol_sent',
+                        'value'   => 'yes',
+                        'compare' => '=',
+                    ],
+                    [
+                        'key'     => '_trendyol_approved',
+                        'value'   => 'yes',
+                        'compare' => '!=',
+                    ],
                 ],
-                [
-                    'key'     => '_trendyol_approved',
-                    'value'   => 'yes',
-                    'compare' => '!=',
-                ],
-            ],
-        ] );
+            ] );
 
-        foreach ( $local_unapproved as $l_id ) {
-            $matched_product_ids[ $l_id ] = true;
+            foreach ( $local_unapproved as $l_id ) {
+                $matched_product_ids[ (int) $l_id ] = true;
+            }
         }
 
         // Filter valid mappings
         $final_ids     = [];
         $omitted_count = 0;
+        $mapper        = $this->product_creator->get_attribute_mapper();
 
         foreach ( array_keys( $matched_product_ids ) as $pid ) {
             $product = wc_get_product( $pid );
-            if ( ! $product || ! $this->product_creator->validate_mapping( $product ) ) {
+            if ( ! $product ) {
+                $omitted_count++;
+                continue;
+            }
+
+            // If this is a variation, also ensure parent variation slicer attributes are valid when not split.
+            if ( $product->is_type( 'variation' ) ) {
+                $parent_id = $product->get_parent_id();
+                $parent    = $parent_id ? wc_get_product( $parent_id ) : null;
+                if ( $parent ) {
+                    $cat_id   = (int) $this->category_helper->get_trendyol_category_id( $parent_id );
+                    $is_split = $cat_id ? $this->category_helper->should_split_variations( $parent_id, $cat_id ) : false;
+                    if ( $cat_id && ! $is_split ) {
+                        $term      = $this->category_helper->get_resolved_category_term( $parent_id );
+                        $term_id   = $term ? (int) $term->term_id : 0;
+                        $var_check = $mapper->validate_variation_attributes( $parent, $cat_id, $term_id );
+                        if ( is_wp_error( $var_check ) ) {
+                            $omitted_count++;
+                            continue;
+                        }
+                    }
+                }
+            }
+
+            if ( ! $this->product_creator->validate_mapping( $product ) ) {
                 $omitted_count++;
                 continue;
             }
@@ -2730,17 +2770,20 @@ class Woo_Trendyol_Admin {
             if ( $count >= 2 ) {
                 $is_custom = ! empty( $attr_data[ $attr_id ]['allowCustom'] ) || (bool) preg_match( '/\b(web|free|custom|serbest)\b/i', (string) ( $attr_data[ $attr_id ]['name'] ?? '' ) );
 
-                // If not custom and values are empty, fetch from API
+                // If not custom and values are empty, fetch from API across mapped categories
                 if ( ! $is_custom && empty( $attr_data[ $attr_id ]['values'] ) && ! empty( $attr_data[ $attr_id ]['cat_ids'] ) ) {
-                    $cat_id = reset( $attr_data[ $attr_id ]['cat_ids'] );
-                    $values_res = $this->api->get_attribute_values( (int) $cat_id, $attr_id );
-                    if ( ! is_wp_error( $values_res ) && ! empty( $values_res['content'] ) ) {
-                        foreach ( $values_res['content'] as $v ) {
-                            $v_id = (int) $v['attributeValueId'];
-                            $attr_data[ $attr_id ]['values'][ $v_id ] = [
-                                'id'   => $v_id,
-                                'name' => (string) $v['attributeValue'],
-                            ];
+                    foreach ( array_unique( $attr_data[ $attr_id ]['cat_ids'] ) as $cat_id ) {
+                        $values_res = $this->api->get_attribute_values( (int) $cat_id, $attr_id );
+                        if ( ! is_wp_error( $values_res ) && ! empty( $values_res['content'] ) ) {
+                            foreach ( $values_res['content'] as $v ) {
+                                $v_id = (int) $v['attributeValueId'];
+                                if ( ! isset( $attr_data[ $attr_id ]['values'][ $v_id ] ) ) {
+                                    $attr_data[ $attr_id ]['values'][ $v_id ] = [
+                                        'id'   => $v_id,
+                                        'name' => (string) $v['attributeValue'],
+                                    ];
+                                }
+                            }
                         }
                     }
                 }
@@ -3538,7 +3581,9 @@ class Woo_Trendyol_Admin {
                 continue;
             }
 
+            $sf_prefix = strtolower( (string) get_option( 'trendyol_storefront_code', 'GR' ) ?: 'gr' );
             delete_transient( 'wt_cat_attrs_' . $trendyol_id );
+            delete_transient( 'wt_cat_attrs_' . $sf_prefix . '_' . $trendyol_id );
             $response = $this->api->get_category_attributes( (int) $trendyol_id );
 
             if ( ! is_wp_error( $response ) && ! empty( $response['categoryAttributes'] ) ) {
@@ -3548,6 +3593,7 @@ class Woo_Trendyol_Admin {
                          $attr_id = $attr['attribute']['id'] ?? 0;
                          
                          delete_transient( 'wt_attr_values_' . $trendyol_id . '_' . $attr_id );
+                         delete_transient( 'wt_attr_values_' . $sf_prefix . '_' . $trendyol_id . '_' . $attr_id );
                          $values_res = $this->api->get_attribute_values( (int) $trendyol_id, $attr_id );
                          $values = [];
                          if ( ! is_wp_error( $values_res ) && ! empty( $values_res['content'] ) ) {
@@ -3604,11 +3650,13 @@ class Woo_Trendyol_Admin {
         ] );
 
         $synced_count = 0;
+        $sf_prefix    = strtolower( (string) get_option( 'trendyol_storefront_code', 'GR' ) ?: 'gr' );
         foreach ( $woo_categories as $cat ) {
              $trendyol_id = get_term_meta( $cat->term_id, Woo_Trendyol_Category_Helper::TERM_META_ID, true );
              if ( $trendyol_id ) {
                  // Trigger caching via API client
                  delete_transient( 'wt_cat_attrs_' . $trendyol_id );
+                 delete_transient( 'wt_cat_attrs_' . $sf_prefix . '_' . $trendyol_id );
                  $this->api->get_category_attributes( (int) $trendyol_id );
                  $synced_count++;
              }
@@ -3643,7 +3691,9 @@ class Woo_Trendyol_Admin {
         }
 
         // Delete the transient to force fetching fresh Greek translation from API
+        $sf_prefix = strtolower( (string) get_option( 'trendyol_storefront_code', 'GR' ) ?: 'gr' );
         delete_transient( 'wt_cat_attrs_' . $category_id );
+        delete_transient( 'wt_cat_attrs_' . $sf_prefix . '_' . $category_id );
 
         $response = $this->api->get_category_attributes( $category_id );
 
@@ -3658,6 +3708,7 @@ class Woo_Trendyol_Admin {
                     $attr_id = $attr['attribute']['id'] ?? 0;
                     
                     delete_transient( 'wt_attr_values_' . $category_id . '_' . $attr_id );
+                    delete_transient( 'wt_attr_values_' . $sf_prefix . '_' . $category_id . '_' . $attr_id );
                     $values_res = $this->api->get_attribute_values( (int) $category_id, $attr_id );
                     $values = [];
                     if ( ! is_wp_error( $values_res ) && ! empty( $values_res['content'] ) ) {

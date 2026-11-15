@@ -495,14 +495,22 @@ class Woo_Trendyol_API_Client {
      */
     public function get_category_attributes( int $category_id ): array|WP_Error {
         // Cache in a transient to avoid repeated API calls.
-        $cache_key = 'wt_cat_attrs_' . $category_id;
+        $sf_prefix = strtolower( $this->storefront_code ?: 'gr' );
+        $cache_key = 'wt_cat_attrs_' . $sf_prefix . '_' . $category_id;
         $cached    = get_transient( $cache_key );
 
         if ( false !== $cached ) {
             return $cached;
         }
 
-        $response = $this->get( "/product/categories/{$category_id}/attributes", [], [ 'Accept-Language' => 'el' ] );
+        $response = $this->get(
+            "/product/categories/{$category_id}/attributes",
+            [],
+            [
+                'Accept-Language' => 'el',
+                'storefront-code' => $this->storefront_code,
+            ]
+        );
 
         if ( ! is_wp_error( $response ) ) {
             // Cache for 24 hours — category schemas rarely change.
@@ -524,7 +532,8 @@ class Woo_Trendyol_API_Client {
      */
     public function get_attribute_values( int $category_id, int $attribute_id ): array|WP_Error {
         // Cache in a transient.
-        $cache_key = 'wt_attr_values_' . $category_id . '_' . $attribute_id;
+        $sf_prefix = strtolower( $this->storefront_code ?: 'gr' );
+        $cache_key = 'wt_attr_values_' . $sf_prefix . '_' . $category_id . '_' . $attribute_id;
         $cached    = get_transient( $cache_key );
 
         if ( false !== $cached ) {

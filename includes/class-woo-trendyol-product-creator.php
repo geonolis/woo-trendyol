@@ -409,6 +409,9 @@ class Woo_Trendyol_Product_Creator {
                 foreach ( $children as $cid ) {
                     $child = wc_get_product( $cid );
                     if ( $child && 'trash' !== $child->get_status() ) {
+                        if ( 'yes' === get_post_meta( $cid, '_trendyol_approved', true ) ) {
+                            continue;
+                        }
                         $flat_ids[] = $cid;
                     }
                 }
