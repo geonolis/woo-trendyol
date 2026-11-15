@@ -331,6 +331,11 @@ class Woo_Trendyol_Admin {
             'trendyol_split_variations_without_slicers',
             [ 'sanitize_callback' => 'sanitize_key', 'default' => 'yes' ]
         );
+        register_setting(
+            'woo_trendyol_defaults_settings',
+            'trendyol_strip_urls_from_description',
+            [ 'sanitize_callback' => 'sanitize_key', 'default' => 'yes' ]
+        );
 
         add_settings_section(
             'woo_trendyol_defaults_section',
@@ -343,6 +348,7 @@ class Woo_Trendyol_Admin {
             [ 'trendyol_default_order_status',             __( 'Default Order Status', 'woo-trendyol' ),             'render_field_default_order_status' ],
             [ 'trendyol_barcode_source',                   __( 'Barcode Source',      'woo-trendyol' ),             'render_field_barcode_source'  ],
             [ 'trendyol_split_variations_without_slicers', __( 'Split Variations Without Slicers', 'woo-trendyol' ), 'render_field_split_variations' ],
+            [ 'trendyol_strip_urls_from_description',      __( 'Strip URLs from Description', 'woo-trendyol' ),      'render_field_strip_urls_description' ],
             [ 'trendyol_default_cargo_company_id',         __( 'Cargo Company ID',    'woo-trendyol' ),             'render_field_cargo_company'   ],
             [ 'trendyol_default_vat_rate',                 __( 'VAT Rate (%)',        'woo-trendyol' ),             'render_field_vat_rate'        ],
             [ 'trendyol_handling_time_type',               __( 'Handling Time',       'woo-trendyol' ),             'render_field_handling_time'   ],
@@ -811,6 +817,27 @@ class Woo_Trendyol_Admin {
         </label>
         <p class="description">
             <?php esc_html_e( 'When a WooCommerce variable product is mapped to a Trendyol category that does not support variation slicers (e.g. Category 4507), enabling this option automatically sends each variation as an individual standalone product on Trendyol so all items are published successfully.', 'woo-trendyol' ); ?>
+        </p>
+        <?php
+    }
+
+    /**
+     * Render the Strip URLs from Description field.
+     *
+     * @since 1.2.0
+     * @param array $args Field arguments.
+     */
+    public function render_field_strip_urls_description( array $args ): void {
+        $value = get_option( 'trendyol_strip_urls_from_description', 'yes' );
+        ?>
+        <label for="trendyol_strip_urls_from_description">
+            <select id="trendyol_strip_urls_from_description" name="trendyol_strip_urls_from_description">
+                <option value="yes" <?php selected( $value, 'yes' ); ?>><?php esc_html_e( 'Yes — Strip YouTube videos, links, and external URLs (Recommended)', 'woo-trendyol' ); ?></option>
+                <option value="no" <?php selected( $value, 'no' ); ?>><?php esc_html_e( 'No — Keep URLs and links in descriptions', 'woo-trendyol' ); ?></option>
+            </select>
+        </label>
+        <p class="description">
+            <?php esc_html_e( 'Trendyol rejects products whose description contains links directing to other websites (such as YouTube videos or external URLs). When enabled, all URLs, video embeds, and hyperlinks are automatically removed from the description sent to Trendyol.', 'woo-trendyol' ); ?>
         </p>
         <?php
     }

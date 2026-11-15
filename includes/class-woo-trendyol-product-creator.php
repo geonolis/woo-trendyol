@@ -1629,6 +1629,17 @@ class Woo_Trendyol_Product_Creator {
             return '';
         }
 
+        $strip_urls = 'yes' === get_option( 'trendyol_strip_urls_from_description', 'yes' );
+
+        // Remove video/embed shortcodes before shortcode expansion when URL stripping is enabled.
+        if ( $strip_urls ) {
+            $raw = (string) preg_replace(
+                '/\[(?:vc_video|embed|video|youtube|vimeo)\b[^\]]*\](?:.*?\[\/(?:vc_video|embed|video|youtube|vimeo)\])?/isu',
+                '',
+                $raw
+            );
+        }
+
         // Initialize WPBakery shortcodes if WPBakery Page Builder is active.
         if ( class_exists( 'WPBMap' ) && method_exists( 'WPBMap', 'addAllMappedShortcodes' ) ) {
             \WPBMap::addAllMappedShortcodes();
@@ -1640,8 +1651,17 @@ class Woo_Trendyol_Product_Creator {
         // Strip any remaining unhandled shortcodes to avoid leaking raw tags.
         $processed = strip_shortcodes( $processed );
 
+        if ( $strip_urls ) {
+            $processed = $this->strip_urls_and_embeds( $processed );
+        }
+
         // Preserve safe HTML formatting (p, br, strong, ul, li, h1-h6, table, etc.) while stripping unsafe tags.
         $clean = wp_kses_post( $processed );
+
+        if ( $strip_urls ) {
+            $clean = $this->strip_urls_and_embeds( $clean );
+        }
+
         $clean = trim( $clean );
 
         // Trendyol API allows descriptions up to 30,000 characters.
@@ -1656,6 +1676,64 @@ class Woo_Trendyol_Product_Creator {
          * @param string     $raw         The original raw description.
          */
         return apply_filters( 'woo_trendyol_product_description', $description, $product, $raw );
+    }
+
+    /**
+     * Strip YouTube/video embeds, hyperlinks, and plain-text URLs from an HTML description.
+     *
+     * @since  1.2.0
+     * @access private
+     * @param  string $html Input HTML description.
+     * @return string Cleaned HTML description without URLs or external embeds.
+     */
+    private function strip_urls_and_embeds( string $html ): string {
+        if ( '' === $html ) {
+            return '';
+        }
+
+        // 1. Remove embedded media/video blocks (iframe, object, video, audio, embed, source).
+        $html = (string) preg_replace( '/<(iframe|object|video|audio)\b[^>]*>.*?<\/\1>/isu', '', $html );
+        $html = (string) preg_replace( '/<(iframe|object|embed|video|audio|source)\b[^>]*\/?>/isu', '', $html );
+
+        // 2. Handle anchor tags: remove completely if the anchor text is itself a URL/domain; otherwise unwrap and keep text.
+        $html = (string) preg_replace_callback(
+            '/<a\b[^>]*>(.*?)<\/a>/isu',
+            static function ( array $matches ): string {
+                $inner_html = $matches[1];
+                $inner_text = trim( wp_strip_all_tags( $inner_html ) );
+                if ( '' === $inner_text ) {
+                    return '';
+                }
+                if ( preg_match( '/^(?:(?:https?:\/\/|ftp:\/\/|www\.)\S+|(?:[a-z0-9\-]+\.)+(?:com|gr|eu|net|org|io|co|be|tv|info|biz|me)(?:\/\S*)?)$/iu', $inner_text ) ) {
+                    return '';
+                }
+                return $inner_html;
+            },
+            $html
+        );
+
+        // 3. Strip plain-text URLs (http://, https://, ftp://, //domain, www., youtube.com, youtu.be, etc.) outside HTML tags.
+        $parts = preg_split( '/(<[^>]+>)/u', $html, -1, PREG_SPLIT_DELIM_CAPTURE );
+        if ( is_array( $parts ) ) {
+            foreach ( $parts as $idx => $part ) {
+                if ( '' === $part || '<' === $part[0] ) {
+                    continue;
+                }
+                // Full URLs with scheme
+                $part = (string) preg_replace( '/\b(?:https?:\/\/|ftp:\/\/)[^\s<>"\'\)]+/iu', '', $part );
+                // Protocol-relative URLs
+                $part = (string) preg_replace( '/(?<![a-z0-9:])\/\/(?:www\.|(?:[a-z0-9\-]+\.)+[a-z]{2,})\/[^\s<>"\'\)]*/iu', '', $part );
+                // Bare www.* or YouTube/Vimeo links
+                $part = (string) preg_replace( '/\b(?:www\.[a-z0-9\-]+(?:\.[a-z]{2,})+(?:\/[^\s<>"\'\)]*)?|(?:(?:m\.)?youtube\.com|youtu\.be|vimeo\.com)\/[^\s<>"\'\)]+)/iu', '', $part );
+                $parts[ $idx ] = $part;
+            }
+            $html = implode( '', $parts );
+        }
+
+        // 4. Clean up empty wrapper tags left behind after stripping embeds/URLs.
+        $html = (string) preg_replace( '/<(p|div|span)\b[^>]*>(?:\s|&nbsp;|&#160;|<br\s*\/?>)*<\/\1>/isu', '', $html );
+
+        return $html;
     }
 
     /**
